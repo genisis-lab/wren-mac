@@ -176,6 +176,12 @@ final class WrenKitTests: XCTestCase {
         XCTAssertEqual(plainText(fromHTML: html), "Hi Ada,\nLine one\nLine two\n• A\n• B & C")
     }
 
+    func testQuotesKeepTheirMarksAsText() {
+        let html = "<div>Thanks!</div><br><div>On Monday, Ada wrote:</div><blockquote type=\"cite\"><p>Is 3 &lt; 4?</p><p></p>"
+            + "<blockquote><div>Yes &amp; no</div></blockquote></blockquote><!-- <blockquote>not this</blockquote> -->"
+        XCTAssertEqual(plainText(fromHTML: html), "Thanks!\n\nOn Monday, Ada wrote:\n\n> Is 3 < 4?\n>\n> > Yes & no")
+    }
+
     func testInlineImagesAreNotListedAsFiles() {
         var email = Email(id: "M1", threadId: "T1", mailboxIds: [:], keywords: [:])
         email.htmlBody = [BodyPart(partId: "h", size: 1, type: "text/html")]

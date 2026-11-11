@@ -54,7 +54,6 @@ public struct Draft: Codable, Hashable, Sendable, Identifiable {
     }
 
     /// What the editor wrote, with the plain-text alternative made from it.
-    /// shortcut: quoted text loses its "> " marks in the plain text, as in the web app; mark blockquotes if people ask.
     public mutating func setHTML(_ html: String) {
         self.html = html
         body = plainText(fromHTML: html)
@@ -322,13 +321,19 @@ public enum PGPKind: Sendable, Equatable {
 
 /// HTML as readable plain text, for quoting a reply and for messages without a text part.
 public func plainText(fromHTML html: String) -> String {
-    var s = html
+    var s = html.replacingOccurrences(of: "(?is)<(head|style|script|title)\\b.*?</\\1\\s*>|<!--.*?-->", with: "", options: .regularExpression)
+    // Quotes, innermost first, become "> " lines: what an encrypted reply (plain text only) has to show them by.
+    // Escaped again, so the steps below leave them as they are. Past 100 deep, quotes lose their marks.
+    for _ in 0..<100 {
+        guard let quote = s.range(of: "(?is)<blockquote\\b[^>]*>(?:(?!<blockquote\\b).)*?</blockquote\\s*>", options: .regularExpression) else { break }
+        let inner = s[quote].replacingOccurrences(of: "(?is)^<blockquote\\b[^>]*>|</blockquote\\s*>$", with: "", options: .regularExpression)
+        let lines = plainText(fromHTML: inner).split(separator: "\n", omittingEmptySubsequences: false)
+        s.replaceSubrange(quote, with: "<br>" + escapeHTML(lines.map { $0.isEmpty ? ">" : "> \($0)" }.joined(separator: "\n")) + "<br>")
+    }
     for (pattern, replacement) in [
-        ("(?is)<(head|style|script|title)\\b.*?</\\1\\s*>", ""),
         ("(?i)<br\\s*/?>", "\n"),
         ("(?i)</(p|div|tr|li|h[1-6]|blockquote|table)\\s*>", "\n"),
         ("(?i)<li\\b[^>]*>", "• "),
-        ("(?s)<!--.*?-->", ""),
         ("(?s)<[^>]+>", ""),
     ] {
         s = s.replacingOccurrences(of: pattern, with: replacement, options: .regularExpression)
