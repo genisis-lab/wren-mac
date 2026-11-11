@@ -160,9 +160,10 @@ final class WrenKitTests: XCTestCase {
             let body = try JSONDecoder().decode(JSON.self, from: Mock.body(of: request))
             XCTAssertEqual(body["using"], [.string(Capability.core), .string(Capability.mail), .string(Capability.submission), .string(Capability.snooze)])
             let calls = body["methodCalls"]?.array ?? []
-            XCTAssertEqual(calls.map { $0.array?[0] }, ["Email/query", "Email/get", "Thread/get"])
+            XCTAssertEqual(calls.map { $0.array?[0] }, ["Email/query", "Email/get", "Thread/get", "SearchSnippet/get"])
             XCTAssertEqual(calls[0].array?[1]["filter"], ["inMailbox": "inbox", "text": "lunch"])
             XCTAssertEqual(calls[2].array?[1]["#ids"]?["path"], "/list/*/threadId")
+            XCTAssertEqual(calls[3].array?[1]["#emailIds"]?["path"], "/ids")
             return ["methodResponses": [
                 ["Email/query", ["ids": ["M1"], "total": 7], "0"],
                 ["Email/get", ["list": [[
@@ -170,6 +171,7 @@ final class WrenKitTests: XCTestCase {
                     "from": [["name": nil, "email": "grace@example.com"]], "subject": "Lunch", "receivedAt": "2026-10-26T09:30:00Z",
                 ]]], "1"],
                 ["Thread/get", ["list": [["id": "T1", "emailIds": ["M0", "M1"]]]], "2"],
+                ["SearchSnippet/get", ["list": [["emailId": "M1", "subject": "<mark>Lunch</mark>", "preview": nil]]], "3"],
             ]]
         }
         let session = try await client.connect()
@@ -180,6 +182,123 @@ final class WrenKitTests: XCTestCase {
         XCTAssertEqual(page.list.first?.count, 2)
         XCTAssertEqual(page.list.first?.email.receivedAt, Date(timeIntervalSince1970: 1_793_007_000))
         XCTAssertEqual(page.list.first?.email.isUnread, false)
+        XCTAssertEqual(page.list.first?.snippet, SearchSnippet(subject: "<mark>Lunch</mark>"))
+    }
+
+    func testTrackingPicturesAreRemovedAndCounted() {
+        let html = """
+        <p>Hi</p><img src="https://cdn.example/hero.png" width="560" height="200">
+        <img width="1" height="1" src="https://news.example/o.gif?u=1&amp;m=2"><IMG SRC='https://x.list-manage.com/track/open.php?u=1'>
+        <img src="https://a.example/p.png" style="display:none"><img src="https://a.example/m.png" style="display: none; width: 300px" alt="hidden gem">
+        <img src="cid:logo@x" width="1" height="1"><img src="https://a.example/w.png" style="width:1px" width="600">
+        """
+        let (clean, removed) = Trackers.strip(html)
+        XCTAssertEqual(removed, 4)
+        XCTAssertTrue(clean.contains("hero.png"), clean)
+        XCTAssertTrue(clean.contains("m.png"), "a hidden picture with a real size stays")
+        XCTAssertTrue(clean.contains("cid:logo@x"), "embedded pictures can't report back")
+        XCTAssertFalse(clean.contains("o.gif") || clean.contains("list-manage") || clean.contains("p.png") || clean.contains("w.png"), clean)
+        XCTAssertEqual(Trackers.strip("<p>No pictures</p>").removed, 0)
+    }
+
+    func testLinksLoseTrackingAndRedirects() {
+        func clean(_ s: String) -> String { Trackers.clean(URL(string: s)!).absoluteString }
+        XCTAssertEqual(clean("https://shop.example/item?id=7&utm_source=news&fbclid=abc"), "https://shop.example/item?id=7")
+        XCTAssertEqual(clean("https://www.google.com/url?q=https%3A%2F%2Fsite.example%2Fa%3Fx%3D1%26utm_medium%3Dmail&sa=D"), "https://site.example/a?x=1")
+        XCTAssertEqual(clean("https://eur01.safelinks.protection.outlook.com/?url=https%3A%2F%2Fsite.example%2F&data=1"), "https://site.example/")
+        XCTAssertEqual(clean("https://site.example/unsubscribe?mkt_tok=abc&utm_campaign=x"), "https://site.example/unsubscribe?mkt_tok=abc")
+        XCTAssertEqual(clean("https://site.example/a?q=a%20b&gclid=1"), "https://site.example/a?q=a%20b")
+        XCTAssertEqual(clean("https://site.example/a?utm_source=x"), "https://site.example/a")
+        XCTAssertEqual(clean("https://site.example/a?ok=1"), "https://site.example/a?ok=1")
+        XCTAssertEqual(clean("mailto:ada@example.com?subject=utm_x"), "mailto:ada@example.com?subject=utm_x")
+    }
+
+    func testMailtoLinksBecomeDrafts() {
+        let me = Identity(id: "I1", name: "Ada", email: "ada@wren.test", textSignature: "Ada")
+        let d = Draft.mailto(URL(string: "mailto:grace@example.com,bob@example.com?cc=carol@example.com&subject=Lunch%20on%20Friday%3F&body=Hi%20Grace%2C%0D%0ANoon%3F&attach=/etc/passwd&to=dan@example.com")!, account: "u1", identity: me)
+        XCTAssertEqual(d.to, "grace@example.com, bob@example.com, dan@example.com")
+        XCTAssertEqual(d.cc, "carol@example.com")
+        XCTAssertEqual(d.subject, "Lunch on Friday?")
+        XCTAssertEqual(d.body, "Hi Grace,\nNoon?\n\nAda")
+        XCTAssertTrue(d.files.isEmpty)
+        XCTAssertEqual(Draft.mailto(URL(string: "MAILTO:?subject=Hi")!, account: "u1", identity: nil).to, "")
+    }
+
+    func testAddressSuggestionsCompleteTheLastAddress() {
+        XCTAssertEqual(Addresses.typing("Ada <ada@example.com>, gr"), "gr")
+        XCTAssertEqual(Addresses.typing("\"Hopper, Gr"), "\"Hopper, Gr")
+        let grace = EmailAddress(name: "Grace Hopper", email: "grace@example.com")
+        XCTAssertEqual(Addresses.complete("Ada <ada@example.com>; gr", with: grace), "Ada <ada@example.com>, Grace Hopper <grace@example.com>, ")
+        XCTAssertEqual(Addresses.complete("", with: grace), "Grace Hopper <grace@example.com>, ")
+        XCTAssertEqual(try Addresses.parse(Addresses.complete("gr", with: grace)), [grace])
+    }
+
+    func testSearchSnippetsSplitIntoMatches() {
+        let pieces = SearchSnippet.pieces("…lunch on <mark>Friday</mark> &amp; <mark>fish</mark>")
+        XCTAssertEqual(pieces.map(\.text), ["…lunch on ", "Friday", " & ", "fish"])
+        XCTAssertEqual(pieces.map(\.isMatch), [false, true, false, true])
+        XCTAssertEqual(SearchSnippet.pieces("a &lt;b&gt;").map(\.text), ["a <b>"])
+    }
+
+    func testVacationPatchSendsOnlyChanges() {
+        var old = VacationResponse()
+        old.subject = "Away"
+        var new = old
+        new.isEnabled = true
+        new.toDate = Date(timeIntervalSince1970: 86_400)
+        XCTAssertEqual(new.patch(from: old), ["isEnabled": true, "toDate": "1970-01-02T00:00:00Z"])
+        new.textBody = "Back Monday."
+        new.toDate = nil
+        old.toDate = Date(timeIntervalSince1970: 0)
+        XCTAssertEqual(new.patch(from: old), ["isEnabled": true, "toDate": nil, "textBody": "Back Monday.", "htmlBody": nil])
+        XCTAssertEqual(old.patch(from: old), [:])
+    }
+
+    func testSettingsAndSuggestionsCalls() async throws {
+        let client = JMAPClient(server: URL(string: "https://mail.test")!, username: "ada@wren.test", password: "wren_app", http: Mock.session)
+        Mock.handler = { request in
+            if request.url?.path == "/jmap/session" {
+                return [
+                    "apiUrl": "https://mail.test/jmap/api", "downloadUrl": "", "uploadUrl": "", "username": "ada@wren.test",
+                    "capabilities": [Capability.core: [:], Capability.mail: [:], Capability.quota: [:], Capability.vacation: [:], Capability.contacts: [:]],
+                    "accounts": ["u1": ["name": "ada@wren.test", "isPersonal": true, "accountCapabilities": [Capability.mail: [:], Capability.contacts: [:]]]],
+                ]
+            }
+            let body = try JSONDecoder().decode(JSON.self, from: Mock.body(of: request))
+            XCTAssertEqual(body["using"], [.string(Capability.core), .string(Capability.mail), .string(Capability.submission), .string(Capability.quota), .string(Capability.vacation), .string(Capability.contacts)])
+            let calls = body["methodCalls"]?.array ?? []
+            switch calls.first?.array?[0].string {
+            case "Quota/get":
+                return ["methodResponses": [["Quota/get", ["list": [["id": "mail", "resourceType": "octets", "used": 900, "hardLimit": 1000]]], "0"]]]
+            case "VacationResponse/get":
+                return ["methodResponses": [["VacationResponse/get", ["list": [["id": "singleton", "isEnabled": true, "fromDate": nil, "toDate": "2026-11-20T00:00:00Z", "subject": "Away", "textBody": "Back soon", "htmlBody": "<p>Back soon</p>"]]], "0"]]]
+            case "VacationResponse/set":
+                XCTAssertEqual(calls[0].array?[1]["update"], ["singleton": ["isEnabled": false]])
+                return ["methodResponses": [["VacationResponse/set", ["updated": ["singleton": nil]], "0"]]]
+            default:
+                XCTAssertEqual(calls.map { $0.array?[0] }, ["ContactCard/query", "ContactCard/get"])
+                XCTAssertEqual(calls[0].array?[1]["filter"], ["text": "gr"])
+                return ["methodResponses": [
+                    ["ContactCard/query", ["ids": ["K2C1", "K1C1"]], "0"],
+                    ["ContactCard/get", ["list": [
+                        ["id": "K1C1", "name": nil, "emails": ["e1": ["@type": "EmailAddress", "address": "greg@example.com"]]],
+                        ["id": "K2C1", "name": ["full": "Grace Hopper"], "emails": ["e1": ["address": "grace@example.com"], "e2": ["address": "g@navy.mil"]]],
+                    ]], "1"],
+                ]]
+            }
+        }
+        let quota = try await client.quota(account: "u1")
+        XCTAssertEqual(quota?.fraction, 0.9)
+        let reply = try await client.vacation(account: "u1")
+        XCTAssertEqual(reply.toDate, Date(timeIntervalSince1970: 1_795_132_800))
+        XCTAssertEqual(reply.textBody, "Back soon")
+        var off = reply
+        off.isEnabled = false
+        try await client.setVacation(off, was: reply, account: "u1")
+        let found = try await client.contacts(matching: "gr", account: "u1")
+        XCTAssertEqual(found, [
+            EmailAddress(name: "Grace Hopper", email: "grace@example.com"), EmailAddress(name: "Grace Hopper", email: "g@navy.mil"), EmailAddress(email: "greg@example.com"),
+        ])
     }
 
     func testWrongPasswordReadsWell() async {

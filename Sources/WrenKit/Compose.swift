@@ -71,6 +71,31 @@ public struct Draft: Codable, Hashable, Sendable, Identifiable {
         return d
     }
 
+    /// A new message from a `mailto:` link (RFC 6068): its addresses, subject and body. Anything else a link
+    /// asks for (such as attaching files) is ignored.
+    public static func mailto(_ url: URL, account: String, identity: Identity?) -> Draft {
+        var d = Draft.new(account: account, identity: identity)
+        let link = url.absoluteString
+        guard link.lowercased().hasPrefix("mailto:") else { return d }
+        let parts = link.dropFirst(7).split(separator: "?", maxSplits: 1, omittingEmptySubsequences: false)
+        let decode = { (s: Substring) in (s.removingPercentEncoding ?? String(s)).replacingOccurrences(of: "\r\n", with: "\n") }
+        var to = [decode(parts[0])]
+        for field in parts.count > 1 ? parts[1].split(separator: "&") : [] {
+            let pair = field.split(separator: "=", maxSplits: 1, omittingEmptySubsequences: false)
+            let value = pair.count > 1 ? decode(pair[1]) : ""
+            switch decode(pair[0]).lowercased() {
+            case "to": to.append(value)
+            case "cc": d.cc = value
+            case "bcc": d.bcc = value
+            case "subject": d.subject = value
+            case "body": d.body = value + d.body
+            default: break
+            }
+        }
+        d.to = to.flatMap(Addresses.pieces).map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }.joined(separator: ", ")
+        return d
+    }
+
     /// A reply to `email`, or a reply to everyone on it, from the identity it was sent to.
     public static func reply(to email: Email, all: Bool, account: String, identities: [Identity]) -> Draft {
         let mine = Set(identities.map { $0.email.lowercased() })
@@ -152,8 +177,8 @@ public enum Addresses {
         public var errorDescription: String? { "“\(text)” isn’t an email address." }
     }
 
-    /// Addresses as typed into a To field: `Ada <ada@example.com>, bob@example.com; "Hopper, Grace" <grace@example.com>`.
-    public static func parse(_ text: String, skippingInvalid: Bool = false) throws -> [EmailAddress] {
+    /// The addresses in a To field as typed, split at commas, semicolons and new lines outside quotes and <>.
+    static func pieces(_ text: String) -> [String] {
         var pieces: [String] = []
         var current = ""
         var quoted = false
@@ -170,7 +195,23 @@ public enum Addresses {
             current.append(ch)
         }
         pieces.append(current)
-        return try pieces.compactMap { piece -> EmailAddress? in
+        return pieces
+    }
+
+    /// The address being typed: the last one in the field.
+    public static func typing(_ text: String) -> String {
+        pieces(text).last?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+    }
+
+    /// The field with the address being typed replaced by a suggestion, ready for the next one.
+    public static func complete(_ text: String, with address: EmailAddress) -> String {
+        let done = pieces(text).dropLast().map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }
+        return (done + [address.formatted]).joined(separator: ", ") + ", "
+    }
+
+    /// Addresses as typed into a To field: `Ada <ada@example.com>, bob@example.com; "Hopper, Grace" <grace@example.com>`.
+    public static func parse(_ text: String, skippingInvalid: Bool = false) throws -> [EmailAddress] {
+        try pieces(text).compactMap { piece -> EmailAddress? in
             let piece = piece.trimmingCharacters(in: .whitespacesAndNewlines)
             if piece.isEmpty { return nil }
             var name: String?

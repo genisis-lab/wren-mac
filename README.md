@@ -6,12 +6,18 @@ It signs in with an app password and talks to your Wren server over JMAP
 mail apps have to be turned on in Wren (Admin → Settings & policies → Security).
 
 - Mailboxes, labels and shared mailboxes in the sidebar, with unread counts and a Dock badge
-- Conversations, search as you type, and a reader that folds older messages
+- Conversations, search as you type with the matching words marked, and a reader that folds older messages
 - Archive, Trash, Junk, flag, read/unread, labels and snooze, from the toolbar, the Message
   menu, swipes and right-click; moves can be undone with ⌘Z
-- Compose in its own window: reply, reply all, forward (with attachments), attach files,
-  send now or later; closing a window with changes saves it to Drafts
-- Live updates over Wren's push stream, and a notification for new mail in your Inbox
+- Compose in its own window: reply, reply all, forward (with attachments), attach files (or drop
+  them on the window), send now or later; closing a window with changes saves it to Drafts
+- Address suggestions as you type, from your Wren contacts and the mail you've loaded
+- Attachments: click to select, Space for Quick Look, double-click to open, drag to the Finder
+- Wren can be your default email app (Settings → General), so `mailto:` links open a new message
+- Out-of-office reply (Settings → Out of Office) and storage used (Settings → Account), with a
+  warning in the sidebar when your mailbox is nearly full
+- Live updates over Wren's push stream, and a notification for new mail in your Inbox that opens
+  the conversation when you click it
 - Mail's keyboard shortcuts (⌘N, ⌘R, ⇧⌘R, ⇧⌘F, ⇧⌘D, ⌃⌘A, ⇧⌘U, ⇧⌘L, ⇧⌘J, ⇧⌘N)
 
 ## Privacy and security
@@ -21,6 +27,10 @@ mail apps have to be turned on in Wren (Admin → Settings & policies → Securi
 - HTML mail is shown with JavaScript off, no cookies or storage, and a Content-Security-Policy
   that blocks everything from the web until you click **Load Remote Content** (or turn it on
   in Settings → Viewing). Links open in your browser.
+- Tracking pictures (tiny or hidden images, and known open trackers) are taken out of every
+  message, even with remote content on, and the reader says how many. Links lose their tracking
+  parameters (`utm_*`, `fbclid` and the like) and known redirect wrappers before they open. These
+  are the same rules as Wren on the web.
 - Attachments you open are saved with the quarantine flag, so Gatekeeper checks them.
 
 ## Building
@@ -64,7 +74,14 @@ repo): it sends, snoozes and deletes.
 WREN_SERVER=http://localhost:8787 WREN_USER=you@example.com WREN_APP_PASSWORD=wren_… swift test
 ```
 
+## Screenshots
+
+The **Screenshots** workflow (Actions → Screenshots → Run workflow, or the `screenshots` label on a
+pull request) runs a debug build against Wren with sample mail on a Mac runner and saves each
+screen, light and dark. They're attached to the run, and pushed to a `screens/<run id>` branch
+(only the newest run's branch is kept). The driver is `Sources/Wren/Demo.swift`, which is only in
+debug builds and only runs when `WREN_DEMO_OUT` is set.
+
 ## Not yet
 
-Several Wren sign-ins at once, an app icon, a rich-text editor, drag-and-drop attachments,
-opening `mailto:` links from other apps, and choosing a notification to open its message.
+Several Wren sign-ins at once, an app icon and a rich-text editor.

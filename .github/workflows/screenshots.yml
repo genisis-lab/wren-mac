@@ -1,0 +1,72 @@
+name: Screenshots
+# Runs the app against Wren with sample mail and saves a picture of each screen, in light and dark mode.
+# Start it from the Actions tab, or add the "screenshots" label to a pull request.
+on:
+  workflow_dispatch:
+    inputs:
+      wren-ref:
+        description: Branch of genisis-lab/mail to run the server from
+        default: claude/wren-mail
+  pull_request:
+    types: [labeled]
+permissions:
+  contents: write
+jobs:
+  screenshots:
+    if: github.event_name == 'workflow_dispatch' || github.event.label.name == 'screenshots'
+    runs-on: macos-15
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/checkout@v7
+        with:
+          repository: genisis-lab/mail
+          ref: ${{ inputs.wren-ref || 'claude/wren-mail' }}
+          path: wren
+          persist-credentials: false
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: wren/package-lock.json
+      - name: Start Wren with sample mail
+        working-directory: wren
+        run: |
+          npm ci
+          mkdir -p .github/screens
+          cp ../.github/screens/server.live.ts ../.github/screens/vitest.config.mjs .github/screens/
+          nohup npx vitest run --config .github/screens/vitest.config.mjs > server.log 2>&1 &
+          for i in $(seq 1 120); do [ -f .github/screens/creds.json ] && break; sleep 1; done
+          sleep 3
+          cat server.log
+          test -f .github/screens/creds.json
+      - name: Build the app (debug, which has the screenshot driver)
+        run: CONFIG=debug ./bundle.sh
+      - name: Take screenshots
+        timeout-minutes: 10
+        run: |
+          KEY=$(node -e 'console.log(require("./wren/.github/screens/creds.json").key)')
+          mkdir -p shots
+          for mode in light dark; do
+            dark=0; [ $mode = dark ] && dark=1
+            WREN_DEMO_OUT=$PWD/shots WREN_DEMO_TAG=$mode WREN_DEMO_DARK=$dark WREN_DEMO_SERVER=http://127.0.0.1:8787 \
+              WREN_DEMO_USER=admin@wren.test WREN_DEMO_PASSWORD=$KEY build/Wren.app/Contents/MacOS/Wren || echo "app exited with $?"
+          done
+          ls shots
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: screenshots
+          path: shots
+      # Also on a branch of its own, which anyone can fetch without signing in. Only the newest run's branch is kept.
+      - name: Save to a screens/ branch
+        if: always()
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          for old in $(git ls-remote --heads origin 'screens/*' | sed 's#.*refs/heads/##'); do git push origin --delete "$old" || true; done
+          git switch --orphan "screens/$GITHUB_RUN_ID"
+          git add -f shots
+          git commit -qm "Screenshots from run $GITHUB_RUN_ID"
+          git push origin "screens/$GITHUB_RUN_ID"
+          echo "Screenshots are on the branch screens/$GITHUB_RUN_ID" >> "$GITHUB_STEP_SUMMARY"

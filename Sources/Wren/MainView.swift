@@ -63,13 +63,23 @@ struct Sidebar: View {
         }
         .listStyle(.sidebar)
         .safeAreaInset(edge: .bottom) {
-            if let problem = store.problem {
-                Label(problem, systemImage: "exclamationmark.triangle")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(3)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(10)
+            // Near the limit, new mail starts bouncing; say so before it does.
+            let full = store.quota.flatMap { $0.fraction >= 0.9 ? $0 : nil }
+            if store.problem != nil || full != nil {
+                VStack(alignment: .leading, spacing: 8) {
+                    if let problem = store.problem {
+                        Label(problem, systemImage: "exclamationmark.triangle")
+                            .lineLimit(3)
+                    }
+                    if let full {
+                        Label("Storage is \(full.fraction.formatted(.percent.precision(.fractionLength(0)))) full. Delete large messages to keep getting mail.", systemImage: "externaldrive.badge.exclamationmark")
+                            .help(storageText(full))
+                    }
+                }
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(10)
             }
         }
     }
@@ -105,4 +115,11 @@ struct MailboxRow: View {
         default: "folder"
         }
     }
+}
+
+/// "1.2 GB of 5 GB used"
+func storageText(_ quota: Quota) -> String {
+    let used = Int64(quota.used).formatted(.byteCount(style: .file))
+    guard quota.hardLimit > 0 else { return "\(used) used" }
+    return "\(used) of \(Int64(quota.hardLimit).formatted(.byteCount(style: .file))) used"
 }

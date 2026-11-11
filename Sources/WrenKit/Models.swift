@@ -7,6 +7,9 @@ public enum Capability {
     public static let submission = "urn:ietf:params:jmap:submission"
     /// Fastmail's mail extension, which Wren uses for snooze.
     public static let snooze = "https://cyrusimap.org/ns/jmap/mail"
+    public static let quota = "urn:ietf:params:jmap:quota"
+    public static let vacation = "urn:ietf:params:jmap:vacationresponse"
+    public static let contacts = "urn:ietf:params:jmap:contacts"
 }
 
 public struct Session: Decodable, Sendable {
@@ -27,7 +30,7 @@ public struct Session: Decodable, Sendable {
     /// The accounts with mail: the person's own first, then each shared mailbox they belong to.
     public var mailAccounts: [Account] {
         accounts.filter { $0.value.accountCapabilities[Capability.mail] != nil }
-            .map { Account(id: $0.key, name: $0.value.name, isPersonal: $0.value.isPersonal, canSnooze: $0.value.accountCapabilities[Capability.snooze] != nil) }
+            .map { Account(id: $0.key, name: $0.value.name, isPersonal: $0.value.isPersonal, capabilities: Set($0.value.accountCapabilities.keys)) }
             .sorted { ($0.isPersonal ? 0 : 1, $0.name) < ($1.isPersonal ? 0 : 1, $1.name) }
     }
 }
@@ -36,7 +39,9 @@ public struct Account: Hashable, Sendable, Identifiable {
     public var id: String
     public var name: String
     public var isPersonal: Bool
-    public var canSnooze: Bool
+    public var capabilities: Set<String>
+
+    public var canSnooze: Bool { capabilities.contains(Capability.snooze) }
 }
 
 public struct EmailAddress: Codable, Hashable, Sendable {
@@ -144,7 +149,76 @@ public struct Email: Codable, Hashable, Sendable, Identifiable {
 public struct Conversation: Hashable, Sendable, Identifiable {
     public var email: Email
     public var count: Int
+    /// Where a search matched, when the list is a search.
+    public var snippet: SearchSnippet?
     public var id: String { email.threadId }
+}
+
+/// A search match in a message's subject and text, with the matching words marked (`<mark>…</mark>`, HTML-escaped).
+public struct SearchSnippet: Codable, Hashable, Sendable {
+    public var subject: String?
+    public var preview: String?
+
+    /// Snippet markup as pieces of plain text, and whether each is a match.
+    public static func pieces(_ markup: String) -> [(text: String, isMatch: Bool)] {
+        var out: [(String, Bool)] = []
+        var rest = Substring(markup)
+        while !rest.isEmpty {
+            let open = rest.range(of: "<mark>")
+            let before = open.map { rest[..<$0.lowerBound] } ?? rest
+            if !before.isEmpty { out.append((unescape(before), false)) }
+            guard let open else { break }
+            rest = rest[open.upperBound...]
+            let close = rest.range(of: "</mark>")
+            let match = close.map { rest[..<$0.lowerBound] } ?? rest
+            if !match.isEmpty { out.append((unescape(match), true)) }
+            rest = close.map { rest[$0.upperBound...] } ?? ""
+        }
+        return out
+    }
+
+    private static func unescape(_ s: Substring) -> String {
+        var s = String(s)
+        for (entity, ch) in [("&lt;", "<"), ("&gt;", ">"), ("&quot;", "\""), ("&#39;", "'"), ("&amp;", "&")] {
+            s = s.replacingOccurrences(of: entity, with: ch)
+        }
+        return s
+    }
+}
+
+/// The out-of-office reply (RFC 8621 section 8). Wren keeps one per person.
+public struct VacationResponse: Codable, Hashable, Sendable {
+    public var isEnabled = false
+    public var fromDate: Date?
+    public var toDate: Date?
+    public var subject: String?
+    public var textBody: String?
+
+    public init() {}
+
+    /// The VacationResponse/set patch that turns `old` into this one: only what changed, so a reply written
+    /// with formatting on the web keeps it unless its text is edited here.
+    public func patch(from old: VacationResponse) -> JSON {
+        var p: [String: JSON] = [:]
+        if isEnabled != old.isEnabled { p["isEnabled"] = .bool(isEnabled) }
+        if fromDate != old.fromDate { p["fromDate"] = fromDate.map { .string(utcDate($0)) } ?? .null }
+        if toDate != old.toDate { p["toDate"] = toDate.map { .string(utcDate($0)) } ?? .null }
+        if (subject ?? "") != (old.subject ?? "") { p["subject"] = .string(subject ?? "") }
+        if (textBody ?? "") != (old.textBody ?? "") {
+            p["textBody"] = .string(textBody ?? "")
+            p["htmlBody"] = .null
+        }
+        return .object(p)
+    }
+}
+
+/// Storage used and allowed (RFC 9425), in bytes.
+public struct Quota: Codable, Hashable, Sendable {
+    public var used: Int
+    public var hardLimit: Int
+
+    /// How full, from 0 to 1 (0 when there's no limit).
+    public var fraction: Double { hardLimit > 0 ? min(1, Double(used) / Double(hardLimit)) : 0 }
 }
 
 public struct UploadedBlob: Codable, Hashable, Sendable {

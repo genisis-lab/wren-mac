@@ -29,6 +29,9 @@ final class LiveServerTests: XCTestCase {
         XCTAssertTrue(email.isUnread)
         let found = try await client.conversations(account: account, mailbox: inbox, search: email.subject ?? "", limit: 50)
         XCTAssertTrue(found.list.contains { $0.id == conversation.id })
+        let words = (email.subject ?? "").split(separator: " ").first.map(String.init) ?? ""
+        let marked = try await client.conversations(account: account, mailbox: inbox, search: words, limit: 50).list.first { $0.id == conversation.id }
+        XCTAssertTrue(marked?.snippet?.subject?.contains("<mark>") == true, "\(String(describing: marked?.snippet))")
         for file in email.attachments ?? [] {
             let data = try await client.download(file, account: account)
             XCTAssertEqual(data.count, file.size)
@@ -85,10 +88,39 @@ final class LiveServerTests: XCTestCase {
         let fwdEmail = try await client.conversation(account: account, threadId: forwarded.id).first { $0.subject == forward.subject }
         XCTAssertEqual(Set(fwdEmail?.attachments?.compactMap(\.name) ?? []), Set(email.attachments?.compactMap(\.name) ?? []))
 
+        // Settings: storage, the out-of-office reply, and address suggestions
+        let me0 = try await client.connect().mailAccounts[0]
+        if me0.capabilities.contains(Capability.quota) {
+            let quota = try await client.quota(account: account)
+            XCTAssertGreaterThan(quota?.used ?? 0, 0)
+        }
+        if me0.capabilities.contains(Capability.vacation) {
+            let before = try await client.vacation(account: account)
+            var away = before
+            away.isEnabled = true
+            away.subject = "Away"
+            away.textBody = "Back on Monday."
+            away.toDate = Date().addingTimeInterval(86_400).rounded
+            try await client.setVacation(away, was: before, account: account)
+            let saved = try await client.vacation(account: account)
+            XCTAssertEqual(saved, away)
+            try await client.setVacation(before, was: saved, account: account)
+        }
+        if me0.capabilities.contains(Capability.contacts) {
+            let people = try await client.contacts(matching: "gr", account: account)
+            XCTAssertFalse(people.isEmpty)
+            XCTAssertTrue(people.allSatisfy { $0.email.lowercased().contains("gr") || ($0.name ?? "").lowercased().contains("gr") }, "\(people)")
+        }
+
         // Deleting: to the Trash, then for good
         try await client.update(account: account, [mine.id: Patch.move(mine, to: trash, folders: folders)])
         try await client.destroy(account: account, ids: [mine.id])
         let gone = try await client.members(account: account, threadIds: [conversation.id])
         XCTAssertFalse(gone.contains { $0.id == mine.id })
     }
+}
+
+extension Date {
+    /// To the second, as JMAP dates are.
+    var rounded: Date { Date(timeIntervalSince1970: timeIntervalSince1970.rounded(.down)) }
 }

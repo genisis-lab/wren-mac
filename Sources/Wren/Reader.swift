@@ -1,4 +1,5 @@
 import AppKit
+import QuickLook
 import SwiftUI
 import UniformTypeIdentifiers
 import WrenKit
@@ -130,7 +131,9 @@ struct MessageView: View {
                     Button("Edit Draft") { openWindow(id: "compose", value: draft) }
                 }
                 let allowRemote = loadRemote || loadRemoteAlways
-                if let html = email.html, !allowRemote, hasRemoteContent(html) {
+                // Tracking pictures are taken out before anything else sees the message.
+                let content = email.html.map(Trackers.strip)
+                if let html = content?.html, !allowRemote, hasRemoteContent(html) {
                     HStack {
                         Label("Remote content is hidden to protect your privacy.", systemImage: "eye.slash")
                         Spacer()
@@ -140,7 +143,13 @@ struct MessageView: View {
                     .padding(10)
                     .background(.quaternary.opacity(0.6), in: RoundedRectangle(cornerRadius: 8))
                 }
-                MessageBody(email: email, allowRemote: allowRemote)
+                if let removed = content?.removed, removed > 0 {
+                    Label(removed == 1 ? "1 tracker blocked" : "\(removed) trackers blocked", systemImage: "hand.raised")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .help("Wren removed pictures whose only job is to tell the sender when you open the message.")
+                }
+                MessageBody(email: email, html: content?.html, allowRemote: allowRemote)
                 if !email.files.isEmpty { AttachmentList(files: email.files) }
             }
         }
@@ -219,13 +228,14 @@ func hasRemoteContent(_ html: String) -> Bool {
 
 struct MessageBody: View {
     let email: Email
+    /// The HTML to show, trackers taken out (nil for a plain-text message).
+    let html: String?
     let allowRemote: Bool
     @Environment(MailStore.self) private var store
-    @Environment(\.openWindow) private var openWindow
     @State private var height: CGFloat = 80
 
     var body: some View {
-        if let html = email.html {
+        if let html {
             MessageWebView(html: html, allowRemote: allowRemote, inline: email.attachments ?? [], download: store.download, openLink: open, height: $height)
                 .frame(height: height)
                 // Mail with colors of its own sits on its own page.
@@ -235,16 +245,19 @@ struct MessageBody: View {
             Text(linked(email.text))
                 .textSelection(.enabled)
                 .frame(maxWidth: .infinity, alignment: .leading)
+                .environment(\.openURL, OpenURLAction { url in
+                    open(url)
+                    return .handled
+                })
         }
     }
 
-    /// Links open in the browser; email addresses start a message here.
+    /// Links open in the browser without their tracking; email addresses start a message here.
     private func open(_ url: URL) {
         if url.scheme?.lowercased() == "mailto" {
-            let to = (url.absoluteString.dropFirst(7).split(separator: "?").first).map { String($0).removingPercentEncoding ?? String($0) } ?? ""
-            if let d = store.newDraft(to: to) { openWindow(id: "compose", value: d) }
+            store.openMailto(url)
         } else {
-            NSWorkspace.shared.open(url)
+            NSWorkspace.shared.open(Trackers.clean(url))
         }
     }
 
@@ -279,40 +292,86 @@ struct Avatar: View {
     }
 }
 
+/// Files under a message, as in Mail: click to select, Space for Quick Look, double-click to open,
+/// or drag one out to the Finder.
 struct AttachmentList: View {
     let files: [BodyPart]
     @Environment(MailStore.self) private var store
+    @FocusState private var selected: BodyPart?
+    @State private var preview: URL?
 
     var body: some View {
         LazyVGrid(columns: [GridItem(.adaptive(minimum: 200), spacing: 8, alignment: .leading)], alignment: .leading, spacing: 8) {
             ForEach(files, id: \.self) { file in
                 let name = file.name ?? "Attachment"
-                Button {
-                    Task { await store.openAttachment(file) }
-                } label: {
-                    HStack(spacing: 8) {
-                        Image(nsImage: NSWorkspace.shared.icon(for: UTType(mimeType: file.type) ?? .data))
-                            .resizable()
-                            .frame(width: 28, height: 28)
-                        VStack(alignment: .leading, spacing: 1) {
-                            Text(name).lineLimit(1).truncationMode(.middle)
-                            Text(Int64(file.size).formatted(.byteCount(style: .file)))
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
+                HStack(spacing: 8) {
+                    Image(nsImage: NSWorkspace.shared.icon(for: UTType(mimeType: file.type) ?? .data))
+                        .resizable()
+                        .frame(width: 28, height: 28)
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text(name).lineLimit(1).truncationMode(.middle)
+                        Text(Int64(file.size).formatted(.byteCount(style: .file)))
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
                     }
-                    .padding(8)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(.quaternary.opacity(0.6), in: RoundedRectangle(cornerRadius: 8))
-                    .contentShape(RoundedRectangle(cornerRadius: 8))
                 }
-                .buttonStyle(.plain)
-                .help("Open \(name)")
+                .padding(8)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(selected == file ? AnyShapeStyle(.tint.opacity(0.25)) : AnyShapeStyle(.quaternary.opacity(0.6)), in: RoundedRectangle(cornerRadius: 8))
+                .contentShape(RoundedRectangle(cornerRadius: 8))
+                .focusable()
+                .focused($selected, equals: file)
+                .focusEffectDisabled()
+                .onTapGesture(count: 2) { Task { await store.openAttachment(file) } }
+                .onTapGesture { selected = file }
+                .onKeyPress(.space) {
+                    quickLook(file)
+                    return .handled
+                }
+                .draggable(DraggedAttachment(part: file, account: store.selectedMailbox?.account ?? "", client: store.client))
+                .help(name)
                 .contextMenu {
                     Button("Open") { Task { await store.openAttachment(file) } }
+                    Button("Quick Look") { quickLook(file) }
                     Button("Save to Downloads") { Task { await store.saveAttachment(file) } }
                 }
+                .accessibilityElement(children: .combine)
+                .accessibilityAddTraits(.isButton)
+                .accessibilityAction { Task { await store.openAttachment(file) } }
+                .accessibilityAction(named: "Quick Look") { quickLook(file) }
             }
         }
+        .quickLookPreview($preview)
+    }
+
+    /// Space opens Quick Look and closes it again.
+    private func quickLook(_ file: BodyPart) {
+        selected = file
+        if preview != nil {
+            preview = nil
+            return
+        }
+        Task {
+            do {
+                preview = try await store.temporaryFile(file)
+            } catch {
+                store.alert = error.localizedDescription
+            }
+        }
+    }
+}
+
+/// An attachment dragged out of a message: downloaded when it's dropped.
+struct DraggedAttachment: Transferable, Sendable {
+    let part: BodyPart
+    let account: String
+    let client: JMAPClient?
+
+    static var transferRepresentation: some TransferRepresentation {
+        FileRepresentation(exportedContentType: .data) { item in
+            guard let client = item.client else { throw NotConnected() }
+            return SentTransferredFile(try await MailStore.temporaryFile(item.part, account: item.account, client: client))
+        }
+        .suggestedFileName { $0.part.name ?? "Attachment" }
     }
 }
