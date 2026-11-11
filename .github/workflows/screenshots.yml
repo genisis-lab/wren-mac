@@ -46,6 +46,7 @@ jobs:
         timeout-minutes: 10
         run: |
           KEY=$(node -e 'console.log(require("./wren/.github/screens/creds.json").key)')
+          KEY2=$(node -e 'console.log(require("./wren/.github/screens/creds.json").key2)')
           mkdir -p shots
           # Windows from the last run aren't brought back.
           defaults write io.github.genisis-lab.wren ApplePersistenceIgnoreState -bool true
@@ -71,9 +72,13 @@ jobs:
           }
           for mode in light dark; do
             dark=0; [ $mode = dark ] && dark=1
-            run --env WREN_DEMO_TAG=$mode --env WREN_DEMO_DARK=$dark \
-              --env WREN_DEMO_SERVER=http://127.0.0.1:8787 --env WREN_DEMO_USER=admin@wren.test --env WREN_DEMO_PASSWORD=$KEY
+            run --env WREN_DEMO_TAG=$mode --env WREN_DEMO_DARK=$dark --env WREN_DEMO_SERVER=http://127.0.0.1:8787 \
+              --env WREN_DEMO_USER=admin@wren.test --env WREN_DEMO_PASSWORD=$KEY --env WREN_DEMO_USER2=sam@wren.test --env WREN_DEMO_PASSWORD2=$KEY2
           done
+          # Once more with the server gone: what's kept on the Mac.
+          kill $(lsof -ti tcp:8787) || true
+          run --env WREN_DEMO_TAG=offline --env WREN_DEMO_OFFLINE=1 --env WREN_DEMO_SERVER=http://127.0.0.1:8787 \
+            --env WREN_DEMO_USER=admin@wren.test --env WREN_DEMO_PASSWORD=$KEY --env WREN_DEMO_USER2=sam@wren.test --env WREN_DEMO_PASSWORD2=$KEY2
           ls shots
       - uses: actions/upload-artifact@v7
         if: always()

@@ -43,19 +43,27 @@ struct Sidebar: View {
 
     var body: some View {
         @Bindable var store = store
+        let several = store.logins.count > 1
         List(selection: $store.selectedMailbox) {
-            ForEach(store.accounts) { account in
-                let boxes = store.mailboxes[account.id] ?? []
-                Section(account.isPersonal ? "Mailboxes" : account.name) {
-                    ForEach(boxes.filter { $0.role != nil }) { box in
-                        MailboxRow(mailbox: box).tag(MailboxRef(account: account.id, mailbox: box.id))
+            if several, let all = store.mailbox(.allInboxes) {
+                MailboxRow(mailbox: all).tag(MailboxRef.allInboxes)
+            }
+            ForEach(store.logins) { login in
+                ForEach(login.accounts) { account in
+                    let boxes = login.mailboxes[account.id] ?? []
+                    // Your own mail is "Mailboxes" with one sign-in, and the address with several; shared mailboxes go by their name.
+                    let title = account.isPersonal ? (several ? login.username : "Mailboxes") : account.name
+                    Section(title) {
+                        ForEach(boxes.filter { $0.role != nil }) { box in
+                            MailboxRow(mailbox: box).tag(MailboxRef(login: login.id, account: account.id, mailbox: box.id))
+                        }
                     }
-                }
-                let labels = boxes.filter { $0.role == nil }
-                if !labels.isEmpty {
-                    Section(account.isPersonal ? "Labels" : "\(account.name) Labels") {
-                        ForEach(labels) { box in
-                            MailboxRow(mailbox: box).tag(MailboxRef(account: account.id, mailbox: box.id))
+                    let labels = boxes.filter { $0.role == nil }
+                    if !labels.isEmpty {
+                        Section(account.isPersonal && !several ? "Labels" : "\(title) Labels") {
+                            ForEach(labels) { box in
+                                MailboxRow(mailbox: box).tag(MailboxRef(login: login.id, account: account.id, mailbox: box.id))
+                            }
                         }
                     }
                 }
@@ -63,17 +71,12 @@ struct Sidebar: View {
         }
         .listStyle(.sidebar)
         .safeAreaInset(edge: .bottom) {
-            // Near the limit, new mail starts bouncing; say so before it does.
-            let full = store.quota.flatMap { $0.fraction >= 0.9 ? $0 : nil }
-            if store.problem != nil || full != nil {
+            if !notes.isEmpty {
                 VStack(alignment: .leading, spacing: 8) {
-                    if let problem = store.problem {
-                        Label(problem, systemImage: "exclamationmark.triangle")
+                    ForEach(notes, id: \.text) { note in
+                        Label(note.text, systemImage: note.icon)
                             .lineLimit(3)
-                    }
-                    if let full {
-                        Label("Storage is \(full.fraction.formatted(.percent.precision(.fractionLength(0)))) full. Delete large messages to keep getting mail.", systemImage: "externaldrive.badge.exclamationmark")
-                            .help(storageText(full))
+                            .help(note.help)
                     }
                 }
                 .font(.caption)
@@ -81,6 +84,26 @@ struct Sidebar: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(10)
             }
+        }
+    }
+
+    private struct Note {
+        var text: String
+        var icon: String
+        var help: String
+    }
+
+    /// Connection problems, and storage near the limit (where new mail starts bouncing), for each sign-in.
+    private var notes: [Note] {
+        store.logins.flatMap { login -> [Note] in
+            let who = store.logins.count > 1 ? "\(login.username): " : ""
+            var notes: [Note] = []
+            if let problem = login.problem { notes.append(Note(text: who + problem, icon: "exclamationmark.triangle", help: problem)) }
+            if let quota = login.quota, quota.fraction >= 0.9 {
+                let full = quota.fraction.formatted(.percent.precision(.fractionLength(0)))
+                notes.append(Note(text: who + "Storage is \(full) full. Delete large messages to keep getting mail.", icon: "externaldrive.badge.exclamationmark", help: storageText(quota)))
+            }
+            return notes
         }
     }
 }
@@ -103,7 +126,8 @@ struct MailboxRow: View {
     }
 
     private var icon: String {
-        switch mailbox.role {
+        if mailbox.id == MailboxRef.allInboxes.mailbox { return "tray.2" }
+        return switch mailbox.role {
         case "inbox": "tray"
         case "archive": "archivebox"
         case "drafts": "doc"

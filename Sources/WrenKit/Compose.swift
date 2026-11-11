@@ -21,6 +21,8 @@ public struct Draft: Codable, Hashable, Sendable, Identifiable {
     }
 
     public var id = UUID()
+    /// Which of the app's sign-ins the draft belongs to (the app sets it; the engine doesn't use it).
+    public var login: String?
     public var accountId: String
     public var identityId: String?
     public var to = ""

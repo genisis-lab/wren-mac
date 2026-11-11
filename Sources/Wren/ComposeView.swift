@@ -36,7 +36,7 @@ struct ComposeView: View {
         _showBcc = State(initialValue: !d.bcc.isEmpty)
     }
 
-    private var identities: [Identity] { store.identities[draft.accountId] ?? [] }
+    private var identities: [Identity] { store.identities(for: draft) }
 
     private func address(_ field: Field?) -> Binding<String>? {
         switch field {
@@ -113,7 +113,7 @@ struct ComposeView: View {
         .task(id: "\(String(describing: focus)) \(typing)") {
             try? await Task.sleep(for: .milliseconds(150))
             let text = typing
-            let found = await store.suggestions(for: text)
+            let found = await store.suggestions(for: text, in: draft)
             guard !Task.isCancelled else { return }
             // Nothing to suggest once the whole address is there.
             suggestions = found.filter { $0.email.caseInsensitiveCompare(text) != .orderedSame && $0.formatted != text }
@@ -294,12 +294,12 @@ struct ComposeView: View {
 
     private func attach(_ result: Result<[URL], Error>) {
         guard case .success(let urls) = result else { return }
-        let account = draft.accountId
+        let target = draft
         for url in urls {
             uploading += 1
             Task {
                 do {
-                    draft.files.append(try await store.upload(url, account: account))
+                    draft.files.append(try await store.upload(url, for: target))
                 } catch {
                     self.error = "\(url.lastPathComponent): \(error.localizedDescription)"
                 }

@@ -40,7 +40,17 @@ it('serves Wren with sample mail', async () => {
   const jmap = (calls: any[]) => h.app.request('/jmap/api', { method: 'POST', headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ using: ['urn:ietf:params:jmap:core', 'urn:ietf:params:jmap:mail'], methodCalls: calls }) });
   const acct = 'u1';
   await jmap([['Mailbox/set', { accountId: acct, create: { a: { name: 'Work' }, b: { name: 'Travel' } } }, '0']]);
-  fs.writeFileSync('.github/screens/creds.json', JSON.stringify({ key }));
+  // A second person, for the app's All Inboxes.
+  await h.call('POST', '/api/admin/users', { email: 'sam@wren.test', name: 'Sam Lee', password: 'sam has a long password' });
+  await h.login('sam@wren.test', 'sam has a long password');
+  const key2 = (await h.call('POST', '/api/account/api-keys', { name: 'Mac', scope: 'mail' })).body.key;
+  const samMail = async (m: any) => {
+    const { raw } = await buildMime({ to: [{ address: 'sam@wren.test', name: 'Sam Lee' }], ...m });
+    await ingest(raw, { rcptTo: ['sam@wren.test'], source: 'test' });
+  };
+  await samMail({ from: { address: 'dorothy@example.com', name: 'Dorothy Vaughan' }, subject: 'FORTRAN workshop slides', date: at(0, 8), text: 'Sam, the slides for Thursday are ready. Can you check the exercises?\n\nDorothy' });
+  await samMail({ from: { address: 'mary@example.com', name: 'Mary Jackson' }, subject: 'Wind tunnel booking', date: at(2, 14), text: 'Booked the tunnel for Tuesday at 10.' });
+  fs.writeFileSync('.github/screens/creds.json', JSON.stringify({ key, key2 }));
   const server = http.createServer(async (req, res) => {
     const chunks: Buffer[] = [];
     for await (const c of req) chunks.push(c as Buffer);

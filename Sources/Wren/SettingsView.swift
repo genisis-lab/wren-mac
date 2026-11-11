@@ -12,7 +12,7 @@ struct SettingsView: View {
                 .tabItem { Label("General", systemImage: "gearshape") }
                 .tag("general")
             AccountSettings()
-                .tabItem { Label("Account", systemImage: "person.crop.circle") }
+                .tabItem { Label("Accounts", systemImage: "person.crop.circle") }
                 .tag("account")
             OutOfOfficeSettings()
                 .tabItem { Label("Out of Office", systemImage: "airplane") }
@@ -66,52 +66,64 @@ struct GeneralSettings: View {
     }
 }
 
+/// Each Wren sign-in, with its storage and shared mailboxes; add another or remove one.
 struct AccountSettings: View {
     @Environment(MailStore.self) private var store
-    @State private var confirming = false
+    @State private var adding = false
+    @State private var removing: Login?
 
     var body: some View {
         Form {
-            if let client = store.client {
-                LabeledContent("Signed in as", value: client.username)
-                LabeledContent("Server", value: client.server.absoluteString)
-                if let quota = store.quota {
-                    LabeledContent("Storage") {
-                        VStack(alignment: .trailing, spacing: 4) {
-                            if quota.hardLimit > 0 {
-                                ProgressView(value: quota.fraction)
-                                    .tint(quota.fraction >= 0.9 ? .red : nil)
-                                    .frame(width: 160)
+            ForEach(store.logins) { login in
+                Section(login.username) {
+                    LabeledContent("Server", value: login.client.server.absoluteString)
+                    if let quota = login.quota {
+                        LabeledContent("Storage") {
+                            VStack(alignment: .trailing, spacing: 4) {
+                                if quota.hardLimit > 0 {
+                                    ProgressView(value: quota.fraction)
+                                        .tint(quota.fraction >= 0.9 ? .red : nil)
+                                        .frame(width: 160)
+                                }
+                                Text(storageText(quota)).foregroundStyle(.secondary)
                             }
-                            Text(storageText(quota)).foregroundStyle(.secondary)
+                        }
+                        .accessibilityValue(storageText(quota))
+                    }
+                    let shared = login.accounts.filter { !$0.isPersonal }
+                    if !shared.isEmpty {
+                        LabeledContent("Shared mailboxes") {
+                            Text(shared.map(\.name).joined(separator: "\n"))
+                                .multilineTextAlignment(.trailing)
                         }
                     }
-                    .accessibilityValue(storageText(quota))
+                    Button("Remove Account…", role: .destructive) { removing = login }
                 }
-                if store.accounts.count > 1 {
-                    LabeledContent("Shared mailboxes") {
-                        Text(store.accounts.filter { !$0.isPersonal }.map(\.name).joined(separator: "\n"))
-                            .multilineTextAlignment(.trailing)
-                    }
-                }
-                Button("Sign Out…", role: .destructive) { confirming = true }
-            } else {
-                Text("Not signed in.").foregroundStyle(.secondary)
             }
+            Button("Add Account…") { adding = true }
         }
         .formStyle(.grouped)
         .fixedSize(horizontal: false, vertical: true)
-        .confirmationDialog("Sign out of Wren?", isPresented: $confirming) {
-            Button("Sign Out", role: .destructive) { store.signOut() }
-        } message: {
-            Text("The app password is removed from this Mac. Your mail stays on the server; drafts you haven’t saved are lost.")
+        .sheet(isPresented: $adding) {
+            SignInView { adding = false }
+                .frame(width: 500, height: 520)
+        }
+        .confirmationDialog(
+            "Remove \(removing?.username ?? "this account")?",
+            isPresented: Binding(get: { removing != nil }, set: { if !$0 { removing = nil } }),
+            presenting: removing
+        ) { login in
+            Button("Remove", role: .destructive) { store.remove(login) }
+        } message: { _ in
+            Text("Its app password and the mail kept on this Mac are removed. The mail stays on the server; drafts you haven’t saved are lost.")
         }
     }
 }
 
-/// The automatic reply Wren sends while you're away.
+/// The automatic reply Wren sends while you're away, for one sign-in at a time.
 struct OutOfOfficeSettings: View {
     @Environment(MailStore.self) private var store
+    @State private var loginId: String?
     /// As on the server, to tell what changed.
     @State private var saved: VacationResponse?
     @State private var reply = VacationResponse()
@@ -120,7 +132,13 @@ struct OutOfOfficeSettings: View {
     @State private var error: String?
 
     var body: some View {
+        let login = store.login(loginId) ?? store.logins.first
         Form {
+            if store.logins.count > 1 {
+                Picker("Account", selection: Binding(get: { login?.id }, set: { loginId = $0 })) {
+                    ForEach(store.logins) { Text($0.username).tag(Optional($0.id)) }
+                }
+            }
             if unavailable {
                 Text("Your Wren server doesn’t offer automatic replies to mail apps.").foregroundStyle(.secondary)
             } else {
@@ -149,7 +167,7 @@ struct OutOfOfficeSettings: View {
         .formStyle(.grouped)
         .fixedSize(horizontal: false, vertical: true)
         .disabled(busy)
-        .task(id: store.personalAccount) { await load() }
+        .task(id: "\(login?.id ?? "") \(login?.personal?.id ?? "")") { await load(login) }
     }
 
     /// A date that's optional: off means "from now" or "until I turn it off".
@@ -165,11 +183,14 @@ struct OutOfOfficeSettings: View {
         }
     }
 
-    private func load() async {
-        guard let personal = store.personalAccount else { return }
+    private func load(_ login: Login?) async {
+        saved = nil
+        reply = VacationResponse()
+        error = nil
+        guard let login, let personal = login.personal else { return }
         unavailable = !personal.capabilities.contains(Capability.vacation)
         do {
-            guard let current = try await store.vacation() else { return }
+            guard let current = try await store.vacation(login) else { return }
             saved = current
             reply = current
             error = nil
@@ -179,11 +200,11 @@ struct OutOfOfficeSettings: View {
     }
 
     private func save() {
-        guard let old = saved else { return }
+        guard let old = saved, let login = store.login(loginId) ?? store.logins.first else { return }
         busy = true
         Task {
             do {
-                try await store.saveVacation(reply, was: old)
+                try await store.saveVacation(reply, was: old, in: login)
                 saved = reply
                 error = nil
             } catch {
