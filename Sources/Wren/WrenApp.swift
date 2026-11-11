@@ -15,6 +15,8 @@ struct WrenApp: App {
         }
         .defaultSize(width: 1100, height: 700)
         .commands { MailCommands(store: store) }
+        // Links and files are the app delegate's: SwiftUI would otherwise rebuild this window for each one.
+        .handlesExternalEvents(matching: [])
 
         WindowGroup("New Message", id: "compose", for: Draft.self) { $draft in
             ComposeView(value: $draft)
@@ -74,8 +76,8 @@ struct RootView: View {
             store.openWindow = openWindow
             store.restore()
         }
-        // mailto: links are the app delegate's; without this SwiftUI also rebuilt this window for each one,
-        // losing its size and selection.
+        // And if one comes here anyway, this window takes it as it is (without these SwiftUI rebuilt it for each
+        // mailto: link, losing its size and selection).
         .handlesExternalEvents(preferring: ["*"], allowing: ["*"])
         #if DEBUG
         .modifier(Demo())
