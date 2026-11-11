@@ -121,6 +121,34 @@ struct Demo: ViewModifier {
         await shoot("09-mailto", in: dir)
         NSApp.windows.filter { $0.title.contains("Hello from a link") }.forEach { $0.close() }
 
+        // A file opened with Wren, as the Share extension (and dropping on the Dock icon) does: a message with it attached.
+        let file = FileManager.default.temporaryDirectory.appending(path: "Notes for Grace.txt")
+        try? "Lunch is at 12:30.".write(to: file, atomically: true, encoding: .utf8)
+        _ = try? await NSWorkspace.shared.open([file], withApplicationAt: Bundle.main.bundleURL, configuration: NSWorkspace.OpenConfiguration())
+        await until { NSApp.windows.contains { $0.isVisible && $0.title == "New Message" } }
+        await wait(2)
+        await shoot("14-file-opened", in: dir)
+        NSApp.windows.filter { $0.title == "New Message" }.forEach { $0.close() }
+
+        // A reply typed into a new-mail notification, then the conversation found in Spotlight from another mailbox.
+        if let inbox = store.inboxes.first, let archive = store.login(inbox.login)?.ref(role: "archive", in: inbox.account),
+           let lunch = store.conversations.first(where: { $0.email.subject?.contains("Lunch") == true }) {
+            await store.notificationAction("reply", thread: lunch.id, in: inbox, reply: "Sounds good, see you there.")
+            store.selectedMailbox = archive
+            await wait(2)
+            await store.showFound(Spotlight.id(lunch.id, in: inbox))
+            await until { store.thread.first?.threadId == lunch.id && store.thread.count > lunch.count }
+            await wait(2)
+            await shoot("15-notification-reply", in: dir)
+        }
+
+        // The Open Mailbox shortcut.
+        _ = try? await OpenMailboxIntent(mailbox: .sent).perform()
+        await until { store.mailbox(store.selectedMailbox)?.role == "sent" && !store.conversations.isEmpty }
+        await wait(2)
+        await shoot("16-shortcut-sent", in: dir)
+        log("unread in the Inboxes: \(store.unreadInInboxes)")
+
         // A second sign-in: All Inboxes, and its own mailboxes in the sidebar.
         if let user2 = env["WREN_DEMO_USER2"], let password2 = env["WREN_DEMO_PASSWORD2"] {
             store.add(JMAPClient(server: server, username: user2, password: password2))

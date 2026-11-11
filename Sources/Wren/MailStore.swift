@@ -3,6 +3,7 @@ import Observation
 import SwiftUI
 import UniformTypeIdentifiers
 import UserNotifications
+import WidgetKit
 import WrenKit
 
 /// A mailbox: which sign-in, which account in it (your own, or a shared mailbox), and which mailbox.
@@ -102,8 +103,10 @@ final class MailStore {
     @ObservationIgnored var openWindow: OpenWindowAction? {
         didSet { openPending() }
     }
-    /// mailto: links that came before Wren was signed in and ready.
+    /// mailto: links and files to attach that came before Wren was signed in and ready.
     @ObservationIgnored private var pendingLinks: [URL] = []
+    /// What the widget was last given.
+    @ObservationIgnored private var widgetMail: UnreadMail?
     /// A conversation to select once the mailbox being shown has loaded (from a notification).
     @ObservationIgnored private var openAfterLoad: String?
     @ObservationIgnored private var limit = 50
@@ -196,7 +199,7 @@ final class MailStore {
         add(client)
         save()
         // The moment to ask: they've just set up their mail.
-        if Self.canNotify { _ = try? await UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound, .badge]) }
+        _ = try? await UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound, .badge])
     }
 
     /// Start using a sign-in (one signed in again replaces itself).
@@ -222,6 +225,7 @@ final class MailStore {
         login.listening?.cancel()
         Keychain.delete(username: login.username, server: login.client.server)
         login.cache.delete()
+        Spotlight.forget(login: login.id)
         logins.removeAll { $0 === login }
         save()
         undoManager?.removeAllActions()
@@ -333,7 +337,10 @@ final class MailStore {
                 rows += page.list.map { ($0, place) }
                 total += page.total
                 loaded = true
-                if search.isEmpty { login.cache.saveList(.init(conversations: page.list, total: page.total), account: place.account, mailbox: place.mailbox) }
+                if search.isEmpty {
+                    login.cache.saveList(.init(conversations: page.list, total: page.total), account: place.account, mailbox: place.mailbox)
+                    Spotlight.index(page.list, in: place)
+                }
             } catch {
                 login.problem = error.localizedDescription
                 // Offline: the list from last time.
@@ -415,6 +422,43 @@ final class MailStore {
         NSApp.activate()
     }
 
+    /// A conversation chosen in Spotlight, in the mailbox it's in now: the Inbox if it's there.
+    func showFound(_ id: String) async {
+        guard let found = Spotlight.found(id), let login = login(found.login) else { return }
+        guard let emails = try? await login.client.conversation(account: found.account, threadId: found.threadId) else { return }
+        let folders = (login.mailboxes[found.account] ?? []).filter { $0.role != nil }
+        let newest = emails.max { ($0.receivedAt ?? .distantPast) < ($1.receivedAt ?? .distantPast) }
+        let inbox = folders.first { folder in folder.role == "inbox" && emails.contains { $0.mailboxIds[folder.id] == true } }
+        // Deleted since it was seen.
+        guard let here = inbox ?? folders.first(where: { newest?.mailboxIds[$0.id] == true }) else { return Spotlight.forget(id) }
+        show(found.threadId, in: MailboxRef(login: login.id, account: found.account, mailbox: here.id))
+    }
+
+    /// Whether the first sign-in is connected (or has what was kept from last time), waiting up to 10 seconds; for
+    /// Shortcuts, which can launch Wren before its window has started the sign-ins.
+    func ready() async -> Bool {
+        restore()
+        for _ in 0..<50 {
+            if let login = logins.first, let personal = login.personal, login.identities[personal.id] != nil, login.mailboxes[personal.id] != nil {
+                return true
+            }
+            if phase == .signedOut { return false }
+            try? await Task.sleep(for: .milliseconds(200))
+        }
+        return false
+    }
+
+    /// A folder of the first sign-in's own account, or All Inboxes for the Inbox when there are several (Shortcuts).
+    func select(role: String) {
+        if role == "inbox", logins.count > 1 {
+            selectedMailbox = .allInboxes
+        } else if let login = logins.first, let personal = login.personal, let ref = login.ref(role: role, in: personal.id) {
+            selectedMailbox = ref
+        }
+        if let openWindow { openWindow(id: "main") }
+        NSApp.activate()
+    }
+
     // MARK: Changing mail
 
     /// The messages an action on these conversations applies to: the ones in the mailbox each is shown from.
@@ -428,8 +472,8 @@ final class MailStore {
         try await login.client.update(account: place.account, Dictionary(emails.map { ($0.id, patch($0)) }, uniquingKeysWith: { a, _ in a }))
     }
 
-    func archive(_ ids: Set<String>) async {
-        await move(ids, to: "archive", actionName: "Archive")
+    func archive(_ ids: Set<String>, in place: MailboxRef? = nil) async {
+        await move(ids, in: place, to: "archive", actionName: "Archive")
     }
 
     /// To the Trash; in the Trash, delete for good after asking.
@@ -446,9 +490,10 @@ final class MailStore {
         await move(ids, to: "inbox", actionName: "Move to Inbox")
     }
 
-    private func move(_ ids: Set<String>, to role: String, actionName: String) async {
+    /// Conversations from where they're shown (or from `only`, for a notification) to the folder with this role.
+    private func move(_ ids: Set<String>, in only: MailboxRef? = nil, to role: String, actionName: String) async {
         var moves: [(place: MailboxRef, ids: Set<String>, target: String)] = []
-        for (place, ids) in places(ids) {
+        for (place, ids) in only.map({ [$0: ids] }) ?? places(ids) {
             if let target = mailbox(role: role, in: place), target.id != place.mailbox { moves.append((place, ids, target.id)) }
         }
         guard !moves.isEmpty else { return }
@@ -505,10 +550,10 @@ final class MailStore {
         await refresh()
     }
 
-    func setRead(_ ids: Set<String>, _ read: Bool) async {
+    func setRead(_ ids: Set<String>, _ read: Bool, in only: MailboxRef? = nil) async {
         updateRows(ids) { $0.keywords["$seen"] = read ? true : nil }
         do {
-            for (place, ids) in places(ids) {
+            for (place, ids) in only.map({ [$0: ids] }) ?? places(ids) {
                 let emails = try await targets(ids, in: place)
                 // Marking unread marks the newest message, as Mail does; marking read covers the whole conversation.
                 let chosen = read ? emails.filter(\.isUnread) : Dictionary(grouping: emails, by: \.threadId).values.compactMap { $0.max { ($0.receivedAt ?? .distantPast) < ($1.receivedAt ?? .distantPast) } }
@@ -707,15 +752,40 @@ final class MailStore {
         openPending()
     }
 
+    /// Files opened with Wren (dropped on its Dock icon, or from the Share menu): a new message with them attached.
+    func openFiles(_ files: [URL]) {
+        pendingLinks += files
+        openPending()
+    }
+
     private func openPending() {
         guard let openWindow, !pendingLinks.isEmpty, let login = logins.first, let personal = login.personal, let identities = login.identities[personal.id] else { return }
-        for link in pendingLinks {
+        for link in pendingLinks where !link.isFileURL {
             var d = Draft.mailto(link, account: personal.id, identity: identities.first)
             d.login = login.id
             openWindow(id: "compose", value: d)
         }
+        let files = pendingLinks.filter(\.isFileURL)
         pendingLinks = []
         NSApp.activate()
+        guard !files.isEmpty else { return }
+        var message = Draft.new(account: personal.id, identity: identities.first)
+        message.login = login.id
+        let draft = message
+        Task {
+            // shortcut: the files upload before the window opens, so big ones take a while with nothing shown; hand them
+            // to the compose window to upload with progress if that's a bother.
+            var withFiles = draft
+            for file in files {
+                do {
+                    let attached = try await upload(file, for: withFiles)
+                    withFiles.files.append(attached)
+                } catch {
+                    alert = "\(file.lastPathComponent) couldn’t be attached: \(error.localizedDescription)"
+                }
+            }
+            openWindow(id: "compose", value: withFiles)
+        }
     }
 
     /// Addresses for what's being typed in a To, Cc or Bcc field: contacts on the draft's server first,
@@ -809,18 +879,68 @@ final class MailStore {
 
     // MARK: Dock and notifications
 
-    /// Unread mail in every sign-in's Inbox.
+    var unreadInInboxes: Int { inboxes.compactMap { mailbox($0) }.map(\.unreadEmails).reduce(0, +) }
+
+    /// Unread mail in every sign-in's Inbox: on the Dock icon, and in the widget when there's an App Group for it.
     private func updateDockBadge() {
-        let unread = inboxes.compactMap { mailbox($0) }.map(\.unreadEmails).reduce(0, +)
+        let unread = unreadInInboxes
         NSApp.dockTile.badgeLabel = unread > 0 ? String(unread) : nil
+        let mail = UnreadMail(inboxes: inboxes.compactMap { ref in
+            guard let login = login(ref.login), let account = login.accounts.first(where: { $0.id == ref.account }) else { return nil }
+            return .init(name: account.isPersonal ? login.username : account.name, unread: mailbox(ref)?.unreadEmails ?? 0)
+        })
+        guard mail != widgetMail, UnreadMail.defaults != nil else { return }
+        widgetMail = mail
+        mail.save()
+        WidgetCenter.shared.reloadAllTimelines()
     }
 
-    /// Notifications need an app bundle (not a bare `swift run` binary).
-    static var canNotify: Bool { Bundle.main.bundleIdentifier != nil }
+    /// The buttons on a new-mail notification.
+    nonisolated static var newMail: UNNotificationCategory {
+        UNNotificationCategory(identifier: "newMail", actions: [
+            UNTextInputNotificationAction(identifier: "reply", title: "Reply", options: [], textInputButtonTitle: "Send", textInputPlaceholder: "Reply"),
+            UNNotificationAction(identifier: "archive", title: "Archive", options: []),
+            UNNotificationAction(identifier: "read", title: "Mark as Read", options: []),
+        ], intentIdentifiers: [])
+    }
+
+    /// What a new-mail notification was clicked for: a button, done without bringing Wren forward, or the
+    /// notification itself, which opens the conversation.
+    func notificationAction(_ action: String, thread: String, in place: MailboxRef, reply text: String?) async {
+        switch action {
+        case "archive": await archive([thread], in: place)
+        case "read": await setRead([thread], true, in: place)
+        case "reply": await quickReply(text ?? "", to: thread, in: place)
+        case UNNotificationDefaultActionIdentifier: show(thread, in: place)
+        default: break
+        }
+    }
+
+    private func quickReply(_ text: String, to threadId: String, in place: MailboxRef) async {
+        guard let emails = try? await login(place.login)?.client.conversation(account: place.account, threadId: threadId),
+              let email = emails.last(where: { !$0.isDraft }),
+              var reply = draft(in: place, { .reply(to: email, all: false, account: $0, identities: $1) })
+        else {
+            alert = "Wren couldn’t reach the server to send your reply: “\(text)”"
+            return
+        }
+        reply.body = text + reply.body
+        do {
+            let saved = try await save(reply)
+            reply.replaces = saved
+            try await send(reply, savedAs: saved)
+            await setRead([threadId], true, in: place)
+        } catch {
+            // Nothing typed is lost: the reply opens to send again.
+            alert = "Your reply wasn’t sent: \(error.localizedDescription)"
+            openWindow?(id: "compose", value: reply)
+            NSApp.activate()
+        }
+    }
 
     /// A notification for each new unread message in a sign-in's Inbox.
     private func notifyNewMail(_ login: Login) async {
-        guard Self.canNotify, let personal = login.personal, let inbox = login.ref(role: "inbox", in: personal.id),
+        guard let personal = login.personal, let inbox = login.ref(role: "inbox", in: personal.id),
               let page = try? await login.client.conversations(account: inbox.account, mailbox: inbox.mailbox, limit: 20)
         else { return }
         let unread = page.list.map(\.email).filter(\.isUnread)
@@ -833,7 +953,8 @@ final class MailStore {
             content.subtitle = logins.count > 1 ? "\(login.username) · \(email.subject ?? "")" : email.subject ?? ""
             content.body = email.preview ?? ""
             content.sound = .default
-            // Clicking it opens the conversation (AppDelegate).
+            content.categoryIdentifier = Self.newMail.identifier
+            // Clicking it opens the conversation; its buttons are in notificationAction (both from AppDelegate).
             content.userInfo = ["login": login.id, "account": inbox.account, "mailbox": inbox.mailbox, "thread": email.threadId]
             try? await UNUserNotificationCenter.current().add(UNNotificationRequest(identifier: email.id, content: content, trigger: nil))
         }

@@ -44,8 +44,6 @@ struct GeneralSettings: View {
                     VStack(alignment: .trailing, spacing: 6) {
                         if let current { Text(FileManager.default.displayName(atPath: current.path)).foregroundStyle(.secondary) }
                         Button("Make Wren the Default") { makeDefault() }
-                            // Only an app bundle can be one (not a bare `swift run` binary).
-                            .disabled(Bundle.main.bundleIdentifier == nil)
                     }
                 }
             }
