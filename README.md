@@ -5,7 +5,10 @@ It signs in with an app password and talks to your Wren server over JMAP
 ([docs/jmap.md](https://github.com/genisis-lab/mail/blob/claude/wren-mail/docs/jmap.md)), so
 mail apps have to be turned on in Wren (Admin → Settings & policies → Security).
 
+- Several Wren accounts (Settings → Accounts), with All Inboxes at the top of the sidebar
 - Mailboxes, labels and shared mailboxes in the sidebar, with unread counts and a Dock badge
+- Opens with your mail showing, and shows what you've looked at when you're offline: the last list
+  of each mailbox and the 150 conversations you opened most recently are kept on your Mac
 - Conversations, search as you type with the matching words marked, and a reader that folds older messages
 - Archive, Trash, Junk, flag, read/unread, labels and snooze, from the toolbar, the Message
   menu, swipes and right-click; moves can be undone with ⌘Z
@@ -22,8 +25,10 @@ mail apps have to be turned on in Wren (Admin → Settings & policies → Securi
 
 ## Privacy and security
 
-- The app password is kept in your login keychain. The server address must be `https`
+- Each account's app password is kept in your login keychain. The server address must be `https`
   (plain `http` only works for `localhost`).
+- The mail kept for offline use is in `~/Library/Application Support/Wren/Cache`, one folder per
+  account, and is deleted when you remove the account.
 - HTML mail is shown with JavaScript off, no cookies or storage, and a Content-Security-Policy
   that blocks everything from the web until you click **Load Remote Content** (or turn it on
   in Settings → Viewing). Links open in your browser.
@@ -84,4 +89,4 @@ debug builds and only runs when `WREN_DEMO_OUT` is set.
 
 ## Not yet
 
-Several Wren sign-ins at once, an app icon and a rich-text editor.
+An app icon and a rich-text editor.

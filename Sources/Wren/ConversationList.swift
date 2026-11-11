@@ -216,9 +216,9 @@ struct MessageActions: View {
                 }
             }
         }
-        if let account = store.selectedMailbox?.account, !store.labels(in: account).isEmpty {
+        if let ref = store.selectedMailbox, !store.labels(in: ref).isEmpty {
             Menu("Labels") {
-                ForEach(store.labels(in: account)) { label in
+                ForEach(store.labels(in: ref)) { label in
                     Toggle(label.name, isOn: Binding(
                         get: { store.hasLabel(label, ids) },
                         set: { on in Task { await store.setLabel(label, on, for: ids) } }

@@ -53,8 +53,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     /// Clicking a new-mail notification opens that conversation.
     nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse, withCompletionHandler completionHandler: @escaping () -> Void) {
         let info = response.notification.request.content.userInfo
-        if let account = info["account"] as? String, let mailbox = info["mailbox"] as? String, let thread = info["thread"] as? String {
-            Task { @MainActor in MailStore.shared.show(thread, in: MailboxRef(account: account, mailbox: mailbox)) }
+        if let login = info["login"] as? String, let account = info["account"] as? String, let mailbox = info["mailbox"] as? String, let thread = info["thread"] as? String {
+            Task { @MainActor in MailStore.shared.show(thread, in: MailboxRef(login: login, account: account, mailbox: mailbox)) }
         }
         completionHandler()
     }

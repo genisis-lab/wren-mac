@@ -328,7 +328,7 @@ struct AttachmentList: View {
                     quickLook(file)
                     return .handled
                 }
-                .draggable(DraggedAttachment(part: file, account: store.selectedMailbox?.account ?? "", client: store.client))
+                .draggable(DraggedAttachment(part: file, account: store.fileSource?.account ?? "", client: store.fileSource?.client))
                 .help(name)
                 .contextMenu {
                     Button("Open") { Task { await store.openAttachment(file) } }

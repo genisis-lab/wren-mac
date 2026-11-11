@@ -301,6 +301,37 @@ final class WrenKitTests: XCTestCase {
         ])
     }
 
+    func testCacheKeepsListsAndTheNewestConversations() throws {
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent("wren-cache-\(UUID().uuidString)")
+        let cache = MailCache(folder: folder, keep: 2)
+        defer { cache.delete() }
+        XCTAssertNil(cache.state)
+        let account = Account(id: "u1", name: "ada@wren.test", isPersonal: true, capabilities: [Capability.mail])
+        cache.state = .init(accounts: [account], mailboxes: ["u1": [Mailbox(id: "inbox", name: "Inbox", role: "inbox", sortOrder: 1, totalEmails: 3, unreadEmails: 1)]], identities: [:])
+        XCTAssertEqual(cache.state?.accounts, [account])
+        XCTAssertEqual(cache.state?.mailboxes["u1"]?.first?.unreadEmails, 1)
+
+        let email = Email(id: "M1T1C1", threadId: "T1C1", mailboxIds: ["inbox": true], keywords: [:], subject: "Lunch", receivedAt: Date(timeIntervalSince1970: 1_793_007_000))
+        cache.saveList(.init(conversations: [Conversation(email: email, count: 2)], total: 9), account: "u1", mailbox: "L1C2/x")
+        XCTAssertEqual(cache.list(account: "u1", mailbox: "L1C2/x")?.conversations.first?.email, email)
+        XCTAssertEqual(cache.list(account: "u1", mailbox: "L1C2/x")?.total, 9)
+        XCTAssertNil(cache.list(account: "u1", mailbox: "archive"))
+
+        for (i, id) in ["T1", "T2", "T3"].enumerated() {
+            cache.saveThread([email], id: id)
+            // Distinct times, oldest first.
+            try FileManager.default.setAttributes([.modificationDate: Date(timeIntervalSince1970: Double(i) * 100)], ofItemAtPath: folder.appendingPathComponent("threads/\(id).json").path)
+        }
+        cache.saveThread([email], id: "T4")
+        XCTAssertNil(cache.thread("T1"))
+        XCTAssertNil(cache.thread("T2"))
+        XCTAssertEqual(cache.thread("T3"), [email])
+        XCTAssertEqual(cache.thread("T4"), [email])
+
+        cache.delete()
+        XCTAssertFalse(FileManager.default.fileExists(atPath: folder.path))
+    }
+
     func testWrongPasswordReadsWell() async {
         let client = JMAPClient(server: URL(string: "https://mail.test")!, username: "ada@wren.test", password: "nope", http: Mock.session)
         Mock.handler = { _ in Mock.Reply(status: 401, json: ["detail": "Sign in with your email address and an app password from Wren’s Settings"]) }

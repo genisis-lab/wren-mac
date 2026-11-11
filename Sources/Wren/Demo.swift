@@ -71,8 +71,9 @@ struct Demo: ViewModifier {
 
         guard let server = env["WREN_DEMO_SERVER"].flatMap(URL.init(string:)), let user = env["WREN_DEMO_USER"], let password = env["WREN_DEMO_PASSWORD"]
         else { exit(1) }
-        store.begin(JMAPClient(server: server, username: user, password: password))
-        await until { !store.conversations.isEmpty && store.quota != nil }
+        store.add(JMAPClient(server: server, username: user, password: password))
+        if env["WREN_DEMO_OFFLINE"] == "1" { return await offline(dir, server: server) }
+        await until { !store.conversations.isEmpty && store.logins.first?.quota != nil }
         await wait(1.5)
         await shoot("02-inbox", in: dir)
 
@@ -90,12 +91,11 @@ struct Demo: ViewModifier {
         store.search = ""
 
         // What a notification click does: from another mailbox, straight to the conversation in the Inbox.
-        let account = store.personalAccount?.id ?? ""
-        if let inbox = store.mailbox(role: "inbox", in: account), let archive = store.mailbox(role: "archive", in: account),
+        if let inbox = store.inboxes.first, let archive = store.login(inbox.login)?.ref(role: "archive", in: inbox.account),
            let lunch = store.conversations.first(where: { $0.count > 1 }) {
-            store.selectedMailbox = MailboxRef(account: account, mailbox: archive.id)
+            store.selectedMailbox = archive
             await wait(2)
-            store.show(lunch.id, in: MailboxRef(account: account, mailbox: inbox.id))
+            store.show(lunch.id, in: inbox)
             await until { store.thread.first?.threadId == lunch.id }
             await wait(2)
             await shoot("07-notification-click", in: dir)
@@ -121,12 +121,34 @@ struct Demo: ViewModifier {
         await shoot("09-mailto", in: dir)
         NSApp.windows.filter { $0.title.contains("Hello from a link") }.forEach { $0.close() }
 
+        // A second sign-in: All Inboxes, and its own mailboxes in the sidebar.
+        if let user2 = env["WREN_DEMO_USER2"], let password2 = env["WREN_DEMO_PASSWORD2"] {
+            store.add(JMAPClient(server: server, username: user2, password: password2))
+            await until { store.selectedMailbox == .allInboxes && store.conversations.count > 7 }
+            await wait(2)
+            await select { $0.email.subject?.contains("FORTRAN") == true }
+            await shoot("10-all-inboxes", in: dir)
+        }
+
         for tab in ["general", "account", "vacation", "viewing"] {
             UserDefaults.standard.set(tab, forKey: "settingsTab")
             openSettings()
             await wait(2)
-            await shoot("10-settings-\(tab)", in: dir)
+            await shoot("11-settings-\(tab)", in: dir)
         }
+        exit(0)
+    }
+
+    /// With the server gone: the sidebar, list and an opened conversation from what's kept on this Mac.
+    private func offline(_ dir: URL, server: URL) async {
+        if let user2 = env["WREN_DEMO_USER2"], let password2 = env["WREN_DEMO_PASSWORD2"] {
+            store.add(JMAPClient(server: server, username: user2, password: password2))
+        }
+        await until { !store.conversations.isEmpty }
+        await wait(3)
+        await shoot("12-offline-list", in: dir)
+        await select { $0.count > 1 }
+        await shoot("13-offline-thread", in: dir)
         exit(0)
     }
 }

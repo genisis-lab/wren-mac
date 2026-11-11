@@ -35,7 +35,7 @@ public struct Session: Decodable, Sendable {
     }
 }
 
-public struct Account: Hashable, Sendable, Identifiable {
+public struct Account: Codable, Hashable, Sendable, Identifiable {
     public var id: String
     public var name: String
     public var isPersonal: Bool
@@ -74,6 +74,15 @@ public struct Mailbox: Codable, Hashable, Sendable, Identifiable {
     public var sortOrder: Int
     public var totalEmails: Int
     public var unreadEmails: Int
+
+    public init(id: String, name: String, role: String?, sortOrder: Int, totalEmails: Int, unreadEmails: Int) {
+        self.id = id
+        self.name = name
+        self.role = role
+        self.sortOrder = sortOrder
+        self.totalEmails = totalEmails
+        self.unreadEmails = unreadEmails
+    }
 }
 
 public struct Identity: Codable, Hashable, Sendable, Identifiable {
@@ -146,7 +155,7 @@ public struct Email: Codable, Hashable, Sendable, Identifiable {
 }
 
 /// A row of the message list: a conversation, shown by its newest message in the mailbox.
-public struct Conversation: Hashable, Sendable, Identifiable {
+public struct Conversation: Codable, Hashable, Sendable, Identifiable {
     public var email: Email
     public var count: Int
     /// Where a search matched, when the list is a search.
