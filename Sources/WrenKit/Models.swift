@@ -120,6 +120,10 @@ public struct BodyPart: Codable, Hashable, Sendable {
 
 public struct BodyValue: Codable, Hashable, Sendable {
     public var value: String
+
+    public init(value: String) {
+        self.value = value
+    }
 }
 
 public struct Email: Codable, Hashable, Sendable, Identifiable {
