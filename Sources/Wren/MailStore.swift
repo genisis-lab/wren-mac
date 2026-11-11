@@ -199,7 +199,7 @@ final class MailStore {
         add(client)
         save()
         // The moment to ask: they've just set up their mail.
-        if Self.canNotify { _ = try? await UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound, .badge]) }
+        _ = try? await UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound, .badge])
     }
 
     /// Start using a sign-in (one signed in again replaces itself).
@@ -895,9 +895,6 @@ final class MailStore {
         WidgetCenter.shared.reloadAllTimelines()
     }
 
-    /// Notifications need an app bundle (not a bare `swift run` binary).
-    static var canNotify: Bool { Bundle.main.bundleIdentifier != nil }
-
     /// The buttons on a new-mail notification.
     nonisolated static var newMail: UNNotificationCategory {
         UNNotificationCategory(identifier: "newMail", actions: [
@@ -943,7 +940,7 @@ final class MailStore {
 
     /// A notification for each new unread message in a sign-in's Inbox.
     private func notifyNewMail(_ login: Login) async {
-        guard Self.canNotify, let personal = login.personal, let inbox = login.ref(role: "inbox", in: personal.id),
+        guard let personal = login.personal, let inbox = login.ref(role: "inbox", in: personal.id),
               let page = try? await login.client.conversations(account: inbox.account, mailbox: inbox.mailbox, limit: 20)
         else { return }
         let unread = page.list.map(\.email).filter(\.isUnread)

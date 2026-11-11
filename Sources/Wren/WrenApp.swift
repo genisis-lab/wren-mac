@@ -37,7 +37,6 @@ struct WrenApp: App {
 final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDelegate {
     func applicationWillFinishLaunching(_ notification: Notification) {
         // Before launch ends, so the click on a notification that launched Wren arrives here.
-        guard MailStore.canNotify else { return }
         UNUserNotificationCenter.current().delegate = self
         UNUserNotificationCenter.current().setNotificationCategories([MailStore.newMail])
     }
