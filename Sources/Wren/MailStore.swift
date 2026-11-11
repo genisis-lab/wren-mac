@@ -92,6 +92,10 @@ final class MailStore {
     private(set) var threadPlace: MailboxRef?
     /// The open conversation's messages that were unread when it opened (reading marks them read; they stay unfolded).
     private(set) var unreadWhenOpened: Set<String> = []
+    /// Accounts ("login account") that refused to send: shared mailboxes you can read but not send from.
+    private(set) var readOnly: Set<String> = []
+    /// Encrypted messages as decrypted for reading (until Wren quits or the key is locked), so a reply can quote them.
+    @ObservationIgnored var decrypted: [String: PGP.Opened] = [:]
 
     /// An action that failed.
     var alert: String?
@@ -224,6 +228,8 @@ final class MailStore {
     func remove(_ login: Login, message: String? = nil) {
         login.listening?.cancel()
         Keychain.delete(username: login.username, server: login.client.server)
+        PGP.shared.forget(login)
+        decrypted = [:]
         login.cache.delete()
         Spotlight.forget(login: login.id)
         logins.removeAll { $0 === login }
@@ -679,12 +685,27 @@ final class MailStore {
 
     func replyDraft(to email: Email? = nil, all: Bool) -> Draft? {
         guard let email = email ?? replyTarget else { return nil }
-        return draft(in: threadPlace) { .reply(to: email, all: all, account: $0, identities: $1) }
+        return encrypted(email) { email in draft(in: threadPlace) { .reply(to: email, all: all, account: $0, identities: $1) } }
     }
 
     func forwardDraft(of email: Email? = nil) -> Draft? {
         guard let email = email ?? replyTarget else { return nil }
-        return draft(in: threadPlace) { .forward(email, account: $0, identities: $1) }
+        return encrypted(email) { email in draft(in: threadPlace) { .forward(email, account: $0, identities: $1) } }
+    }
+
+    /// Answering encrypted mail: quoted as it was decrypted (when it was), and encrypted again by default.
+    /// shortcut: files inside an encrypted message aren't forwarded; upload them along if people ask.
+    private func encrypted(_ email: Email, _ make: (Email) -> Draft?) -> Draft? {
+        guard PGPKind(email)?.isEncrypted == true else { return make(email) }
+        var d = make(decrypted[email.id].map { $0.shown(in: email) } ?? email)
+        d?.encrypt = true
+        return d
+    }
+
+    /// Lock a sign-in's key and forget what it decrypted.
+    func lockPGP(_ login: Login) {
+        PGP.shared.lock(login)
+        decrypted = [:]
     }
 
     func editDraft(_ email: Email) -> Draft? {
@@ -721,8 +742,40 @@ final class MailStore {
         guard let login = login(of: draft), let place = place(of: draft), let identity = identity(for: draft),
               let drafts = mailbox(role: "drafts", in: place), let sent = mailbox(role: "sent", in: place)
         else { throw NotConnected() }
-        try await login.client.submit(emailId: emailId, account: draft.accountId, identity: identity, recipients: draft.recipients, sendAt: date, draftsMailbox: drafts.id, sentMailbox: sent.id)
+        try await login.client.submit(
+            emailId: emailId, account: draft.accountId, identity: identity, recipients: draft.recipients, sendAt: date,
+            privateLinkDays: draft.privateLinkDays, draftsMailbox: drafts.id, sentMailbox: sent.id
+        )
         await refresh(login)
+    }
+
+    /// Whether a draft's account has Wren's extension (private links, PGP keys).
+    func hasWren(_ draft: Draft) -> Bool {
+        login(of: draft)?.accounts.first { $0.id == draft.accountId }?.hasWren == true
+    }
+
+    // MARK: Invitations
+
+    /// Whether the conversation being read is in an account that can send. Wren says so only when an answer is
+    /// refused, so it's learned then.
+    /// shortcut: buttons show until the first refusal; read it from the session once Wren's capability says.
+    var canSendHere: Bool {
+        threadPlace.map { !readOnly.contains("\($0.login) \($0.account)") } ?? false
+    }
+
+    /// Accept, maybe or decline the invitation in an email; the organizer gets the answer from Wren.
+    /// Returns who the answer went to.
+    func answer(_ email: Email, _ answer: Invite.Answer, comment: String) async throws -> String? {
+        guard let place = threadPlace, let login = login(place.login) else { throw NotConnected() }
+        let to: String?
+        do {
+            to = try await login.client.answer(invite: email.id, answer, comment: comment, account: place.account)
+        } catch JMAPError.method("forbidden", let detail) {
+            readOnly.insert("\(place.login) \(place.account)")
+            throw JMAPError.method("forbidden", detail)
+        }
+        await refresh(login)
+        return to
     }
 
     /// Throw away a draft that was saved before.
@@ -837,10 +890,14 @@ final class MailStore {
     /// A copy in a temporary folder, to open, preview or drag out. Files the app writes are quarantined
     /// (LSFileQuarantineEnabled), so Gatekeeper checks them before they open.
     nonisolated static func temporaryFile(_ part: BodyPart, account: String, client: JMAPClient) async throws -> URL {
+        try temporaryFile(fileName(part), try await client.download(part, account: account))
+    }
+
+    nonisolated static func temporaryFile(_ name: String, _ data: Data) throws -> URL {
         let folder = FileManager.default.temporaryDirectory.appendingPathComponent("Wren").appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-        let url = folder.appendingPathComponent(fileName(part))
-        try await client.download(part, account: account).write(to: url)
+        let url = folder.appendingPathComponent(fileName(BodyPart(size: data.count, name: name, type: "")))
+        try data.write(to: url)
         return url
     }
 
@@ -860,9 +917,17 @@ final class MailStore {
 
     func saveAttachment(_ part: BodyPart) async {
         do {
-            let data = try await download(part)
+            saveToDownloads(Self.fileName(part), try await download(part))
+        } catch {
+            alert = error.localizedDescription
+        }
+    }
+
+    /// Into Downloads (numbered if the name is taken), shown in the Finder.
+    func saveToDownloads(_ fileName: String, _ data: Data) {
+        do {
             let downloads = try FileManager.default.url(for: .downloadsDirectory, in: .userDomainMask, appropriateFor: nil, create: true)
-            let name = Self.fileName(part) as NSString
+            let name = Self.fileName(BodyPart(size: data.count, name: fileName, type: "")) as NSString
             var url = downloads.appendingPathComponent(name as String)
             var n = 2
             while FileManager.default.fileExists(atPath: url.path) {

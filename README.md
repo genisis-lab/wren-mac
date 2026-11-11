@@ -14,6 +14,14 @@ mail apps have to be turned on in Wren (Admin → Settings & policies → Securi
   menu, swipes and right-click; moves can be undone with ⌘Z
 - Compose in its own window: reply, reply all, forward (with attachments), attach files (or drop
   them on the window), send now or later; closing a window with changes saves it to Drafts
+- Formatting as you write: bold, italic, underline (⌘B, ⌘I, ⌘U), links (⌘K), bulleted and numbered
+  lists and quotes. It's sent as HTML with a plain-text copy, and replies keep the quoted message's HTML
+- Calendar invitations show a card with what, when, where and who's asking, and Accept, Maybe and
+  Decline (with a comment) send your answer to the organizer
+- Send as a private link that stops working after 1, 7 or 30 days, as on the web
+- PGP, the same as Wren on the web (Settings → Encryption): restore your key from the backup you made
+  in Wren, read encrypted mail (inline and PGP/MIME) and check signatures, and encrypt and sign what
+  you send when Wren knows a key for everyone you write to
 - Address suggestions as you type, from your Wren contacts and the mail you've loaded
 - Attachments: click to select, Space for Quick Look, double-click to open, drag to the Finder
 - Wren can be your default email app (Settings → General), so `mailto:` links open a new message
@@ -44,6 +52,13 @@ mail apps have to be turned on in Wren (Admin → Settings & policies → Securi
   parameters (`utm_*`, `fbclid` and the like) and known redirect wrappers before they open. These
   are the same rules as Wren on the web.
 - Attachments you open are saved with the quarantine flag, so Gatekeeper checks them.
+- The editor is a web page with its scripts off, so nothing in a quoted message runs, and nothing loads
+  from the web while you write.
+- PGP uses OpenPGP.js 6.3.2, the same as Wren on the web, built into the app (`Resources/pgp.js`, made
+  from `pgp/` with `npm ci && npm run build`); it's never downloaded. It runs in a hidden web page that
+  can't reach the network. Your private key is kept in your login keychain still protected by its
+  passphrase; the passphrase unlocks it in memory until you quit or choose Lock, and is never saved.
+  Encrypted mail is shown without remote pictures, and drafts written with Encrypt on are saved encrypted.
 - Spotlight's index of your conversations stays on your Mac, and each account's entries are deleted
   when you remove the account.
 
@@ -115,4 +130,5 @@ debug builds and only runs when `WREN_DEMO_OUT` is set.
 
 ## Not yet
 
-A rich-text editor.
+Pictures pasted on their own aren’t put in the message (attach them instead). Files you add with Encrypt on
+are encrypted when the message is sent, not as you add them (the web app does both).

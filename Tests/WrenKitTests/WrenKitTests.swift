@@ -66,6 +66,16 @@ final class WrenKitTests: XCTestCase {
         XCTAssertEqual(d.references, ["m0@example.com", "m1@example.com"])
         XCTAssertTrue(d.body.hasPrefix("\n\nAda\nWren\n\n"), d.body)
         XCTAssertTrue(d.body.hasSuffix("Grace wrote:\n\n> Noon?\n>> earlier"), d.body)
+        // The editor gets the quote as HTML: the original's text, escaped, in a blockquote.
+        XCTAssertTrue(d.html?.hasPrefix("<br><br>Ada<br>Wren<br><br><div class=\"wren-quote\"><div>") == true, d.html ?? "")
+        XCTAssertTrue(d.html?.contains("<pre style=\"white-space:pre-wrap;font-family:inherit\">Noon?\n&gt; earlier</pre></blockquote>") == true, d.html ?? "")
+        var rich = email
+        rich.htmlBody = [BodyPart(partId: "h", size: 1, type: "text/html")]
+        rich.bodyValues?["h"] = BodyValue(value: "<p>Noon?</p><img src=\"https://t.example/open.gif\" width=\"1\" height=\"1\">")
+        let quoted = Draft.reply(to: rich, all: false, account: "u1", identities: [me]).html ?? ""
+        XCTAssertTrue(quoted.contains("<blockquote type=\"cite\""), quoted)
+        XCTAssertTrue(quoted.contains("<p>Noon?</p>"), quoted)
+        XCTAssertFalse(quoted.contains("open.gif"), quoted)
         XCTAssertEqual(Draft.reply(to: email, all: false, account: "u1", identities: [me]).cc, "")
         XCTAssertEqual(Draft.prefixed("Re:", "RE: Lunch?"), "RE: Lunch?")
 
@@ -91,6 +101,50 @@ final class WrenKitTests: XCTestCase {
         d.cc = "nope, bob@example.org"
         XCTAssertEqual(try d.emailObject(from: Identity(id: "I1", name: "Ada", email: "ada@wren.test"), draftsMailbox: "drafts")["cc"], [["email": "bob@example.org"]])
         XCTAssertThrowsError(try d.recipients)
+        XCTAssertNil(try d.emailObject(from: Identity(id: "I1", name: "Ada", email: "ada@wren.test"), draftsMailbox: "drafts")["htmlBody"])
+    }
+
+    func testRichDraftSendsHTMLWithATextAlternative() throws {
+        var d = Draft(accountId: "u1", identityId: "I1")
+        d.setHTML("<div>Hi <b>Grace</b> &amp; Kim,</div><ul><li>One</li></ul><div><br></div>")
+        XCTAssertEqual(d.body, "Hi Grace & Kim,\n• One")
+        let o = try d.emailObject(from: Identity(id: "I1", name: "Ada", email: "ada@wren.test"), draftsMailbox: "drafts")
+        XCTAssertEqual(o["textBody"], [["partId": "body", "type": "text/plain"]])
+        XCTAssertEqual(o["htmlBody"], [["partId": "html", "type": "text/html"]])
+        XCTAssertEqual(o["bodyValues"]?["html"]?["value"]?.string, d.html)
+        XCTAssertEqual(o["bodyValues"]?["body"]?["value"], "Hi Grace & Kim,\n• One")
+        XCTAssertEqual(Draft.html(fromText: "a < b\nc"), "a &lt; b<br>c")
+    }
+
+    func testPGPKindIsToldFromTheMessage() {
+        let block = "-----BEGIN PGP MESSAGE-----\n\nwcFMA\n-----END PGP MESSAGE-----"
+        var email = Email(id: "M1", threadId: "T1", mailboxIds: [:], keywords: [:])
+        func text(_ value: String) {
+            email.textBody = [BodyPart(partId: "t", size: 1, type: "text/plain")]
+            email.bodyValues = ["t": BodyValue(value: value)]
+        }
+        XCTAssertNil(PGPKind(email))
+        // Inline, as some apps indent it: found, and the indent taken off.
+        text("Hi,\n  " + block.replacingOccurrences(of: "\n", with: "\n  ") + "\nBye")
+        XCTAssertEqual(PGPKind(email), .encrypted)
+        XCTAssertEqual(PGPKind.armored(in: email.text), block)
+        XCTAssertTrue(PGPKind.isMessage(email.text))
+        text("-----BEGIN PGP SIGNED MESSAGE-----\nHash: SHA512\n\nHello\n-----BEGIN PGP SIGNATURE-----\n\nwnUE\n-----END PGP SIGNATURE-----")
+        XCTAssertEqual(PGPKind(email), .signed)
+        XCTAssertEqual(PGPKind.armored(in: email.text, signed: true), email.text)
+        XCTAssertNil(PGPKind.armored(in: email.text))
+        // PGP/MIME (RFC 3156): what's encrypted is the part that isn't the version part; a signature is its own part.
+        let version = BodyPart(blobId: "A1", size: 10, name: nil, type: "application/pgp-encrypted")
+        let data = BodyPart(blobId: "A2", size: 900, name: "encrypted.asc", type: "application/octet-stream")
+        email.attachments = [version, data]
+        XCTAssertEqual(PGPKind(email), .encryptedMIME)
+        XCTAssertEqual(PGPKind.encryptedMIME.part(of: email), data)
+        text("Hello")
+        let signature = BodyPart(blobId: "A3", size: 300, name: "signature.asc", type: "application/pgp-signature")
+        email.attachments = [signature]
+        XCTAssertEqual(PGPKind(email), .signedMIME)
+        XCTAssertEqual(PGPKind.signedMIME.part(of: email), signature)
+        XCTAssertFalse(PGPKind.signedMIME.isEncrypted)
     }
 
     func testMovesKeepLabelsAndReplaceTheFolder() {
@@ -299,6 +353,65 @@ final class WrenKitTests: XCTestCase {
         XCTAssertEqual(found, [
             EmailAddress(name: "Grace Hopper", email: "grace@example.com"), EmailAddress(name: "Grace Hopper", email: "g@navy.mil"), EmailAddress(email: "greg@example.com"),
         ])
+    }
+
+    func testWrenExtensionCalls() async throws {
+        let client = JMAPClient(server: URL(string: "https://mail.test")!, username: "ada@wren.test", password: "wren_app", http: Mock.session)
+        Mock.handler = { request in
+            if request.url?.path == "/jmap/session" {
+                return [
+                    "apiUrl": "https://mail.test/jmap/api", "downloadUrl": "", "uploadUrl": "", "username": "ada@wren.test",
+                    "capabilities": [Capability.core: [:], Capability.mail: [:], Capability.wren: [:]],
+                    "accounts": ["u1": ["name": "ada@wren.test", "isPersonal": true, "accountCapabilities": [Capability.mail: [:], Capability.wren: [:]]]],
+                ]
+            }
+            let body = try JSONDecoder().decode(JSON.self, from: Mock.body(of: request))
+            XCTAssertEqual(body["using"], [.string(Capability.core), .string(Capability.mail), .string(Capability.submission), .string(Capability.wren)])
+            let calls = body["methodCalls"]?.array ?? []
+            let args = calls.last?.array?[1] ?? nil
+            switch calls.first?.array?[0].string {
+            case "Thread/get":
+                XCTAssertTrue(args["properties"]?.array?.contains("invite") == true)
+                return ["methodResponses": [
+                    ["Thread/get", ["list": [["id": "T1", "emailIds": ["M1"]]]], "0"],
+                    ["Email/get", ["list": [[
+                        "id": "M1", "threadId": "T1", "mailboxIds": ["inbox": true], "keywords": [:], "blobId": "R1",
+                        "invite": [
+                            "method": "REQUEST", "summary": "Planning", "location": "", "start": "2026-12-16T17:00:00Z", "end": "2026-12-16T17:30:00Z",
+                            "allDay": false, "status": "CONFIRMED", "organizer": ["email": "maya@example.com", "name": "Maya Chen"],
+                            "attendees": [["email": "ada@wren.test", "name": nil, "status": "NEEDS-ACTION"]],
+                            "me": ["email": "ada@wren.test", "status": "NEEDS-ACTION"], "rsvp": nil, "canReply": true, "uid": "x", "recurring": false,
+                        ],
+                    ]]], "1"],
+                ]]
+            case "Invite/reply":
+                XCTAssertEqual(args, ["accountId": "u1", "emailId": "M1", "status": "tentative", "comment": "Running late"])
+                return ["methodResponses": [["Invite/reply", ["accountId": "u1", "emailId": "M1", "status": "tentative", "to": "maya@example.com"], "0"]]]
+            case "PgpKey/lookup":
+                XCTAssertEqual(args["addresses"], ["grace@example.com", "kim@example.com"])
+                return ["methodResponses": [["PgpKey/lookup", ["keys": ["grace@example.com": [["fingerprint": "F1", "armored": "KEY"]]]], "0"]]]
+            case "PgpBackup/get":
+                return ["methodResponses": [["PgpBackup/get", ["list": [["id": "singleton", "fingerprint": "F2", "armored": "LOCKED", "updatedAt": "2026-11-01T00:00:00Z"]]], "0"]]]
+            default:
+                XCTAssertEqual(args["create"]?["send"]?["privateLinkDays"], 7)
+                return ["methodResponses": [["EmailSubmission/set", ["created": ["send": ["id": "S1"]]], "0"]]]
+            }
+        }
+        let invite = try await client.conversation(account: "u1", threadId: "T1").first?.invite
+        XCTAssertEqual(invite?.summary, "Planning")
+        XCTAssertEqual(invite?.organizer?.name, "Maya Chen")
+        XCTAssertEqual(invite?.answer, nil)
+        XCTAssertEqual(invite?.canReply, true)
+        XCTAssertNotNil(invite?.when())
+        XCTAssertEqual(Invite.Answer(status: "DECLINED"), .declined)
+        let to = try await client.answer(invite: "M1", .tentative, comment: " Running late ", account: "u1")
+        XCTAssertEqual(to, "maya@example.com")
+        let keys = try await client.pgpKeys(for: ["Kim@example.com", "grace@example.com", "kim@example.com"], account: "u1")
+        XCTAssertEqual(keys, ["grace@example.com": ["KEY"]])
+        let backup = try await client.pgpBackup(account: "u1")
+        XCTAssertEqual(backup?.armored, "LOCKED")
+        let me = Identity(id: "I1", name: "Ada", email: "ada@wren.test")
+        try await client.submit(emailId: "M2", account: "u1", identity: me, recipients: [], privateLinkDays: 7, draftsMailbox: "drafts", sentMailbox: "sent")
     }
 
     func testCacheKeepsListsAndTheNewestConversations() throws {

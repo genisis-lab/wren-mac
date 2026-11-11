@@ -20,6 +20,9 @@ struct SettingsView: View {
             ViewingSettings()
                 .tabItem { Label("Viewing", systemImage: "eye") }
                 .tag("viewing")
+            EncryptionSettings()
+                .tabItem { Label("Encryption", systemImage: "lock") }
+                .tag("encryption")
         }
         .frame(width: 460)
     }
@@ -225,5 +228,84 @@ struct ViewingSettings: View {
         }
         .formStyle(.grouped)
         .fixedSize(horizontal: false, vertical: true)
+    }
+}
+
+/// Each sign-in's PGP key, restored from the backup made in Wren on the web, as the web app keeps it: protected by
+/// its passphrase in the keychain, and unlocked only until Wren quits.
+struct EncryptionSettings: View {
+    @Environment(MailStore.self) private var store
+    @State private var keys: [String: PGP.KeyInfo] = [:]
+    @State private var busy: String?
+    @State private var problem: String?
+
+    var body: some View {
+        Form {
+            ForEach(store.logins) { login in
+                Section(login.username) {
+                    if let key = keys[login.id] {
+                        let open = PGP.shared.unlocked.contains(login.id)
+                        LabeledContent("Key", value: key.userIds.joined(separator: ", "))
+                        LabeledContent("Fingerprint") {
+                            Text(key.groupedFingerprint)
+                                .font(.system(.callout, design: .monospaced))
+                                .multilineTextAlignment(.trailing)
+                                .textSelection(.enabled)
+                        }
+                        LabeledContent("Status", value: open ? "Unlocked until you quit Wren" : "Locked")
+                        HStack {
+                            Spacer()
+                            if open {
+                                Button("Lock") { store.lockPGP(login) }
+                            } else {
+                                Button("Unlock…") { Task { _ = await PGP.shared.unlockAsking(login) } }
+                            }
+                            Button("Remove from This Mac") {
+                                PGP.shared.forget(login)
+                                store.decrypted = [:]
+                                keys[login.id] = nil
+                            }
+                            .help("The backup in Wren stays, so you can restore it again.")
+                        }
+                    } else if login.personal?.hasWren == true {
+                        Text("Restore the PGP key you backed up in Wren on the web, to read encrypted mail and to encrypt and sign what you send. Your passphrase unlocks it on this Mac and is never saved.")
+                            .font(.callout)
+                            .foregroundStyle(.secondary)
+                        HStack {
+                            Spacer()
+                            if busy == login.id { ProgressView().controlSize(.small) }
+                            Button("Restore from Wren…") { restore(login) }
+                                .disabled(busy != nil)
+                        }
+                    } else {
+                        Text("This server doesn’t offer PGP keys to mail apps.").foregroundStyle(.secondary)
+                    }
+                }
+            }
+            if let problem {
+                Label(problem, systemImage: "exclamationmark.triangle.fill").foregroundStyle(.red)
+            }
+        }
+        .formStyle(.grouped)
+        .fixedSize(horizontal: false, vertical: true)
+        .task(id: store.logins.map(\.id)) {
+            for login in store.logins { keys[login.id] = await PGP.shared.key(login) }
+        }
+    }
+
+    private func restore(_ login: Login) {
+        guard let passphrase = PGP.askPassphrase(
+            title: "Restore Your PGP Key", message: "Enter the passphrase you chose when you backed up your key in Wren.", button: "Restore"
+        ) else { return }
+        busy = login.id
+        problem = nil
+        Task {
+            do {
+                keys[login.id] = try await PGP.shared.restore(login, passphrase: passphrase)
+            } catch {
+                problem = error.localizedDescription
+            }
+            busy = nil
+        }
     }
 }

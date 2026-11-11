@@ -25,8 +25,15 @@ struct ComposeView: View {
     @State private var suggestions: [EmailAddress] = []
     @State private var suggestion = 0
     @FocusState private var focus: Field?
+    @State private var editor = EditorController()
+    @State private var format = FormatState()
+    /// Changed to start the editor over with the draft's text (after an encrypted draft is opened).
+    @State private var editorVersion = 0
+    /// With Encrypt on: who has no PGP key Wren knows.
+    @State private var missingKeys: [String] = []
+    @State private var confirmingPlain = false
 
-    enum Field: Hashable { case to, cc, bcc, subject, body }
+    enum Field: Hashable { case to, cc, bcc, subject }
 
     init(value: Binding<Draft?>) {
         _value = value
@@ -53,8 +60,10 @@ struct ComposeView: View {
     }
 
     private var canSend: Bool {
-        !busy && uploading == 0 && ((try? draft.recipients.isEmpty) == false)
+        !busy && uploading == 0 && ((try? draft.recipients.isEmpty) == false) && !(draft.encrypt == true && !missingKeys.isEmpty)
     }
+
+    private var usesPGP: Bool { draft.encrypt == true || draft.sign == true }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -83,14 +92,15 @@ struct ComposeView: View {
                     Spacer()
                 }
             }
+            notes
             Divider()
-            TextEditor(text: $draft.body)
-                .font(.body)
-                .scrollContentBackground(.hidden)
-                .padding(.horizontal, 12)
-                .padding(.vertical, 8)
-                .focused($focus, equals: .body)
-                .accessibilityLabel("Message")
+            FormatBar(state: format, editor: editor)
+                .disabled(usesPGP)
+            RichEditor(
+                html: draft.html ?? Draft.html(fromText: draft.body), startFocused: !draft.to.isEmpty, controller: editor, state: $format,
+                onChange: { draft.setHTML($0) }, onFiles: { attach(.success($0)) }
+            )
+            .id(editorVersion)
             if !draft.files.isEmpty || uploading > 0 {
                 Divider()
                 files
@@ -143,6 +153,7 @@ struct ComposeView: View {
                 .disabled(!canSend)
             }
             ToolbarItemGroup(placement: .primaryAction) {
+                if store.hasWren(draft) { wrenOptions }
                 Button { picking = true } label: { Label("Attach", systemImage: "paperclip") }
                     .help("Attach Files (⇧⌘A)")
                     .keyboardShortcut("a", modifiers: [.command, .shift])
@@ -160,11 +171,116 @@ struct ComposeView: View {
             if draft.accountId.isEmpty, let d = store.newDraft() {
                 draft = d
                 saved = d
+                editorVersion += 1
             }
-            focus = draft.to.isEmpty ? .to : .body
+            if draft.to.isEmpty { focus = .to }
+            if draft.encrypt == true { value = nil }
         }
-        .onChange(of: draft) { value = draft }
+        .task { await openEncryptedDraft() }
+        .task(id: "\(draft.encrypt == true) \(draft.to) \(draft.cc) \(draft.bcc)") {
+            guard draft.encrypt == true else { return missingKeys = [] }
+            try? await Task.sleep(for: .milliseconds(400))
+            let missing = await store.missingKeys(draft)
+            if !Task.isCancelled { missingKeys = missing }
+        }
+        .confirmationDialog("Turn off encryption?", isPresented: $confirmingPlain) {
+            Button("Send Unencrypted", role: .destructive) { draft.encrypt = false }
+        } message: {
+            Text("This message, including the text it quotes, will be saved and sent unencrypted.")
+        }
+        // Kept for restoring the window after Wren quits, which writes it to disk: never an Encrypt-on draft's plain text.
+        .onChange(of: draft) { value = draft.encrypt == true ? nil : draft }
         .onDisappear { saveOnClose() }
+    }
+
+    /// Private link, Encrypt and Sign: Wren's own options, for accounts on a server that has them.
+    @ViewBuilder
+    private var wrenOptions: some View {
+        Menu {
+            Picker("Send as Private Link", selection: $draft.privateLinkDays) {
+                Text("Off").tag(Int?.none)
+                ForEach([1, 7, 30], id: \.self) { Text($0 == 1 ? "For 1 Day" : "For \($0) Days").tag(Int?.some($0)) }
+            }
+            .pickerStyle(.inline)
+        } label: {
+            Label("Private Link", systemImage: draft.privateLinkDays == nil ? "link" : "link.circle.fill")
+        }
+        .help(usesPGP ? "PGP mail can’t be sent as a private link" : "Send as a private link that stops working after a while")
+        .disabled(usesPGP)
+        Toggle(isOn: Binding(get: { draft.encrypt == true }, set: { on in
+            if !on && saved.encrypt == true { confirmingPlain = true } else { setPGP(encrypt: on) }
+        })) {
+            Label("Encrypt", systemImage: draft.encrypt == true ? "lock.fill" : "lock.open")
+        }
+        .toggleStyle(.button)
+        .help(draft.privateLinkDays != nil ? "Turn off the private link first: PGP mail can’t be sent as a link" : "Encrypt with PGP")
+        .disabled(draft.privateLinkDays != nil)
+        Toggle(isOn: Binding(get: { draft.sign == true }, set: { setPGP(sign: $0) })) {
+            Label("Sign", systemImage: "signature")
+        }
+        .toggleStyle(.button)
+        .help(draft.privateLinkDays != nil ? "Turn off the private link first: PGP mail can’t be sent as a link" : "Sign with your PGP key")
+        .disabled(draft.privateLinkDays != nil)
+    }
+
+    /// Encrypt and Sign need your key on this Mac.
+    private func setPGP(encrypt: Bool? = nil, sign: Bool? = nil) {
+        Task {
+            if encrypt == true || sign == true, let login = store.login(draft.login) ?? store.logins.first, await PGP.shared.key(login) == nil {
+                error = "To encrypt or sign, restore your PGP key in Settings → Encryption."
+                return
+            }
+            if let encrypt { draft.encrypt = encrypt }
+            if let sign { draft.sign = sign }
+            if error?.contains("PGP key in Settings") == true { error = nil }
+        }
+    }
+
+    /// What the options do to this message, said plainly.
+    @ViewBuilder
+    private var notes: some View {
+        if let days = draft.privateLinkDays {
+            note("Sends as a private link that stops working after \(days == 1 ? "1 day" : "\(days) days").", "link")
+        }
+        if draft.encrypt == true {
+            if missingKeys.isEmpty {
+                note("Encrypted for everyone you’re writing to\(draft.sign == true ? " and signed" : ""), as plain text.", "lock.fill")
+            } else {
+                note("There’s no PGP key for \(missingKeys.joined(separator: ", ")). Remove them or turn off Encrypt.", "lock.trianglebadge.exclamationmark", .red)
+            }
+        } else if draft.sign == true {
+            note("Signed with your PGP key, as plain text.", "signature")
+        }
+    }
+
+    private func note(_ text: String, _ symbol: String, _ color: Color = .secondary) -> some View {
+        VStack(spacing: 0) {
+            Divider()
+            Label(text, systemImage: symbol)
+                .font(.callout)
+                .foregroundStyle(color)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 6)
+        }
+    }
+
+    /// An encrypted draft opens decrypted, with Encrypt still on.
+    private func openEncryptedDraft() async {
+        guard draft.replaces != nil, let armored = PGPKind.armored(in: draft.body), let login = store.login(draft.login) ?? store.logins.first else { return }
+        guard await PGP.shared.unlockAsking(login) else {
+            error = "This draft is encrypted. Unlock your PGP key to edit it."
+            return
+        }
+        do {
+            let text = try await PGP.shared.decrypt(armored, login: login.id, senderKeys: []).text ?? ""
+            draft.setHTML(Draft.html(fromText: text))
+            draft.encrypt = true
+            saved = draft
+            editorVersion += 1
+        } catch {
+            self.error = error.localizedDescription
+        }
     }
 
     private func row<Content: View>(_ label: String, @ViewBuilder content: () -> Content) -> some View {
@@ -326,11 +442,17 @@ struct ComposeView: View {
         error = nil
         Task {
             do {
+                // With Encrypt or Sign on, what's saved and sent is the PGP text; nil if the passphrase was cancelled.
+                guard var outgoing = try await store.sealed(draft, forSending: true) else {
+                    busy = false
+                    return
+                }
                 // Saved first, so a failed send leaves the message in Drafts instead of losing it.
-                let id = try await store.save(draft)
+                let id = try await store.save(outgoing)
                 draft.replaces = id
+                outgoing.replaces = id
                 saved = draft
-                try await store.send(draft, savedAs: id, at: date)
+                try await store.send(outgoing, savedAs: id, at: date)
                 done = true
                 dismiss()
             } catch {
@@ -353,7 +475,9 @@ struct ComposeView: View {
         guard !done, d != saved, !empty else { return }
         Task {
             do {
-                _ = try await store.save(d)
+                // With Encrypt on, a draft is kept encrypted for you, never as plain text.
+                guard let toSave = try await store.sealed(d, forSending: false) else { return }
+                _ = try await store.save(toSave)
             } catch {
                 store.alert = "Your draft couldn’t be saved: \(error.localizedDescription)"
             }
