@@ -465,8 +465,9 @@ final class MailStore {
             alert = error.localizedDescription
         }
         if !moved.isEmpty {
+            let done = moved
             undoManager?.registerUndo(withTarget: self) { store in
-                Task { await store.putBack(moved) }
+                Task { await store.putBack(done) }
             }
             undoManager?.setActionName(actionName)
         }

@@ -19,6 +19,11 @@ public struct MailCache: Sendable {
     public struct List: Codable, Sendable {
         public var conversations: [Conversation]
         public var total: Int
+
+        public init(conversations: [Conversation], total: Int) {
+            self.conversations = conversations
+            self.total = total
+        }
     }
 
     public let folder: URL

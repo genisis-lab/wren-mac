@@ -74,6 +74,15 @@ public struct Mailbox: Codable, Hashable, Sendable, Identifiable {
     public var sortOrder: Int
     public var totalEmails: Int
     public var unreadEmails: Int
+
+    public init(id: String, name: String, role: String?, sortOrder: Int, totalEmails: Int, unreadEmails: Int) {
+        self.id = id
+        self.name = name
+        self.role = role
+        self.sortOrder = sortOrder
+        self.totalEmails = totalEmails
+        self.unreadEmails = unreadEmails
+    }
 }
 
 public struct Identity: Codable, Hashable, Sendable, Identifiable {
