@@ -1,0 +1,70 @@
+# The Xcode project, for XcodeGen. Wren.xcodeproj is made from this file: after changing it, run `xcodegen generate`
+# (CI does, and commits the result when it changed).
+name: Wren
+options:
+  bundleIdPrefix: io.github.genisis-lab
+  deploymentTarget:
+    macOS: "14.0"
+  createIntermediateGroups: true
+settings:
+  base:
+    SWIFT_VERSION: "5.0"
+    MARKETING_VERSION: 0.1.0
+    CURRENT_PROJECT_VERSION: 1
+    # Signed for this Mac only unless bundle.sh (or Xcode) is given a team and certificate.
+    CODE_SIGN_STYLE: Manual
+    CODE_SIGN_IDENTITY: "-"
+    DEVELOPMENT_TEAM: ""
+    ENABLE_DEBUG_DYLIB: NO
+    DEAD_CODE_STRIPPING: YES
+packages:
+  WrenKit:
+    path: .
+targets:
+  Wren:
+    type: application
+    platform: macOS
+    sources:
+      - Sources/Wren
+      - Sources/Shared
+    dependencies:
+      - package: WrenKit
+      - target: WrenWidget
+      - target: WrenShare
+    settings:
+      base:
+        PRODUCT_NAME: Wren
+        PRODUCT_BUNDLE_IDENTIFIER: io.github.genisis-lab.wren
+        INFOPLIST_FILE: Info.plist
+        CODE_SIGN_ENTITLEMENTS: Wren.entitlements
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+  WrenWidget:
+    type: app-extension
+    platform: macOS
+    sources:
+      - Sources/WrenWidget
+      - Sources/Shared
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: io.github.genisis-lab.wren.widget
+        INFOPLIST_FILE: Sources/WrenWidget/Info.plist
+        CODE_SIGN_ENTITLEMENTS: Sources/WrenWidget/WrenWidget.entitlements
+  WrenShare:
+    type: app-extension
+    platform: macOS
+    sources:
+      - Sources/WrenShare
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: io.github.genisis-lab.wren.share
+        INFOPLIST_FILE: Sources/WrenShare/Info.plist
+        CODE_SIGN_ENTITLEMENTS: Sources/WrenShare/WrenShare.entitlements
+schemes:
+  Wren:
+    build:
+      targets:
+        Wren: all
+    run:
+      config: Debug
+    archive:
+      config: Release

@@ -1,7 +1,9 @@
 import SwiftUI
 import WrenKit
 
+/// The first sign-in fills the window; another one (Settings → Accounts) comes up in a sheet, with `done`.
 struct SignInView: View {
+    var done: (() -> Void)?
     @Environment(MailStore.self) private var store
     @AppStorage("server") private var server = ""
     @AppStorage("username") private var username = ""
@@ -17,7 +19,7 @@ struct SignInView: View {
                 .font(.system(size: 44))
                 .foregroundStyle(.tint)
                 .accessibilityHidden(true)
-            Text("Sign in to Wren")
+            Text(done == nil ? "Sign in to Wren" : "Add a Wren Account")
                 .font(.title.weight(.semibold))
             Text("Use an app password, not your account password. Create one in Wren on the web, under Settings → Security → Mail apps.")
                 .font(.callout)
@@ -38,25 +40,34 @@ struct SignInView: View {
             .disabled(busy)
             .onSubmit { if ready { signIn() } }
 
-            if let message = error ?? store.signInMessage {
+            if let message = error ?? (done == nil ? store.signInMessage : nil) {
                 Label(message, systemImage: "exclamationmark.triangle.fill")
                     .foregroundStyle(.red)
                     .frame(maxWidth: 400)
                     .multilineTextAlignment(.center)
             }
 
-            Button {
-                signIn()
-            } label: {
-                if busy { ProgressView().controlSize(.small) } else { Text("Sign In") }
+            HStack {
+                if let done {
+                    Button("Cancel", action: done)
+                        .controlSize(.large)
+                        .keyboardShortcut(.cancelAction)
+                }
+                Button {
+                    signIn()
+                } label: {
+                    if busy { ProgressView().controlSize(.small) } else { Text("Sign In") }
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.large)
+                .keyboardShortcut(.defaultAction)
+                .disabled(!ready)
             }
-            .buttonStyle(.borderedProminent)
-            .controlSize(.large)
-            .keyboardShortcut(.defaultAction)
-            .disabled(!ready)
         }
         .padding(40)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        // Another account is usually another address on the same server.
+        .onAppear { if done != nil { username = "" } }
     }
 
     private func signIn() {
@@ -70,6 +81,7 @@ struct SignInView: View {
             do {
                 try await store.signIn(server: url, username: username.trimmingCharacters(in: .whitespaces).lowercased(), password: password.trimmingCharacters(in: .whitespacesAndNewlines))
                 password = ""
+                done?()
             } catch {
                 self.error = error.localizedDescription
             }

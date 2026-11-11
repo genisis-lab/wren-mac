@@ -71,8 +71,9 @@ struct Demo: ViewModifier {
 
         guard let server = env["WREN_DEMO_SERVER"].flatMap(URL.init(string:)), let user = env["WREN_DEMO_USER"], let password = env["WREN_DEMO_PASSWORD"]
         else { exit(1) }
-        store.begin(JMAPClient(server: server, username: user, password: password))
-        await until { !store.conversations.isEmpty && store.quota != nil }
+        store.add(JMAPClient(server: server, username: user, password: password))
+        if env["WREN_DEMO_OFFLINE"] == "1" { return await offline(dir, server: server) }
+        await until { !store.conversations.isEmpty && store.logins.first?.quota != nil }
         await wait(1.5)
         await shoot("02-inbox", in: dir)
 
@@ -90,12 +91,11 @@ struct Demo: ViewModifier {
         store.search = ""
 
         // What a notification click does: from another mailbox, straight to the conversation in the Inbox.
-        let account = store.personalAccount?.id ?? ""
-        if let inbox = store.mailbox(role: "inbox", in: account), let archive = store.mailbox(role: "archive", in: account),
+        if let inbox = store.inboxes.first, let archive = store.login(inbox.login)?.ref(role: "archive", in: inbox.account),
            let lunch = store.conversations.first(where: { $0.count > 1 }) {
-            store.selectedMailbox = MailboxRef(account: account, mailbox: archive.id)
+            store.selectedMailbox = archive
             await wait(2)
-            store.show(lunch.id, in: MailboxRef(account: account, mailbox: inbox.id))
+            store.show(lunch.id, in: inbox)
             await until { store.thread.first?.threadId == lunch.id }
             await wait(2)
             await shoot("07-notification-click", in: dir)
@@ -121,12 +121,149 @@ struct Demo: ViewModifier {
         await shoot("09-mailto", in: dir)
         NSApp.windows.filter { $0.title.contains("Hello from a link") }.forEach { $0.close() }
 
-        for tab in ["general", "account", "vacation", "viewing"] {
+        // A file opened with Wren, as the Share extension (and dropping on the Dock icon) does: a message with it attached.
+        let file = FileManager.default.temporaryDirectory.appending(path: "Notes for Grace.txt")
+        try? "Lunch is at 12:30.".write(to: file, atomically: true, encoding: .utf8)
+        _ = try? await NSWorkspace.shared.open([file], withApplicationAt: Bundle.main.bundleURL, configuration: NSWorkspace.OpenConfiguration())
+        await until { NSApp.windows.contains { $0.isVisible && $0.title == "New Message" } }
+        await wait(2)
+        await shoot("14-file-opened", in: dir)
+        NSApp.windows.filter { $0.title == "New Message" }.forEach { $0.close() }
+
+        // A reply typed into a new-mail notification, then the conversation found in Spotlight from another mailbox.
+        if let inbox = store.inboxes.first, let archive = store.login(inbox.login)?.ref(role: "archive", in: inbox.account),
+           let lunch = store.conversations.first(where: { $0.email.subject?.contains("Lunch") == true }) {
+            await store.notificationAction("reply", thread: lunch.id, in: inbox, reply: "Sounds good, see you there.")
+            store.selectedMailbox = archive
+            await wait(2)
+            await store.showFound(Spotlight.id(lunch.id, in: inbox))
+            await until { store.thread.first?.threadId == lunch.id && store.thread.count > lunch.count }
+            await wait(2)
+            await shoot("15-notification-reply", in: dir)
+        }
+
+        // The Open Mailbox shortcut.
+        _ = try? await OpenMailboxIntent(mailbox: .sent).perform()
+        await until { store.mailbox(store.selectedMailbox)?.role == "sent" && !store.conversations.isEmpty }
+        await wait(2)
+        await shoot("16-shortcut-sent", in: dir)
+        log("unread in the Inboxes: \(store.unreadInInboxes)")
+        await richMail(dir)
+
+        // A second sign-in: All Inboxes, and its own mailboxes in the sidebar.
+        if let user2 = env["WREN_DEMO_USER2"], let password2 = env["WREN_DEMO_PASSWORD2"] {
+            store.add(JMAPClient(server: server, username: user2, password: password2))
+            await until { store.selectedMailbox == .allInboxes && store.conversations.count > 7 }
+            await wait(2)
+            await select { $0.email.subject?.contains("FORTRAN") == true }
+            await shoot("10-all-inboxes", in: dir)
+        }
+
+        for tab in ["general", "account", "vacation", "viewing", "encryption"] {
             UserDefaults.standard.set(tab, forKey: "settingsTab")
             openSettings()
             await wait(2)
-            await shoot("10-settings-\(tab)", in: dir)
+            await shoot("11-settings-\(tab)", in: dir)
         }
+        exit(0)
+    }
+
+    private func window(titled title: String) async -> NSWindow? {
+        await until { NSApp.windows.contains { $0.isVisible && $0.title == title } }
+        return NSApp.windows.first { $0.isVisible && $0.title == title }
+    }
+
+    /// Mac 4: a formatted reply sent as a private link, an invitation answered, and PGP mail read and written.
+    private func richMail(_ dir: URL) async {
+        guard let inbox = store.inboxes.first, let login = store.login(inbox.login) else { return log("no inbox") }
+        store.selectedMailbox = inbox
+        await until { store.conversations.contains { $0.email.subject == "Cipher settings" } }
+
+        await select { $0.email.subject?.contains("Analytical") == true }
+        if var reply = store.replyDraft(all: false) {
+            reply.setHTML("<div>Thank you, Ada. I read <b>Note G</b> twice; two things:</div><ol><li>The table in <i>section 4</i> needs one more column.</li>"
+                + "<li>Could we <u>meet on Thursday</u>?</li></ol><div><a href=\"https://wren.test/notes\">My notes</a></div>" + (reply.html ?? ""))
+            reply.privateLinkDays = 7
+            store.openWindow?(id: "compose", value: reply)
+            let compose = await window(titled: reply.subject)
+            await wait(2.5)
+            await shoot("17-rich-reply", in: dir)
+            compose?.close()
+        }
+
+        await select { $0.email.subject == "Invitation: Planning review" }
+        await shoot("18-invite", in: dir)
+        // The first pass answers it; a second pass on the same server finds it answered, above the reply.
+        if let email = store.thread.last(where: { $0.invite != nil }), email.invite?.rsvp == nil {
+            do {
+                let to = try await store.answer(email, .accepted, comment: "See you there.")
+                log("invite answered, sent to \(to ?? "nobody")")
+            } catch {
+                log("invite answer failed: \(error.localizedDescription)")
+            }
+            await until { store.thread.first { $0.id == email.id }?.invite?.rsvp != nil }
+            await wait(1.5)
+            await shoot("19-invite-answered", in: dir)
+        } else if let rsvp = store.thread.last(where: { $0.invite != nil })?.invite?.rsvp {
+            log("invitation already answered: \(rsvp)")
+        } else {
+            log("no invitation on the message (a server without Wren's extension?)")
+        }
+
+        // The key backed up on the web, restored with its passphrase (the prompt is skipped here).
+        do {
+            let key = try await PGP.shared.restore(login, passphrase: "wren demo passphrase")
+            log("PGP key restored: \(key.groupedFingerprint) \(key.userIds)")
+        } catch {
+            return log("PGP restore failed: \(error.localizedDescription)")
+        }
+        let pgpMail: [(String, PGPKind)] = [("Cipher settings", .encrypted), ("Launch window", .encryptedMIME), ("Status page updated", .signedMIME)]
+        for (subject, kind) in pgpMail {
+            await select { $0.email.subject == subject }
+            if let email = store.thread.last {
+                let started = Date.now
+                do {
+                    let opened = try await store.openPGP(email, kind)
+                    log("\(subject): \(kind), \(opened.text?.count ?? 0) characters, signature \(opened.signature?.rawValue ?? "none"), \(Int(Date.now.timeIntervalSince(started) * 1000)) ms")
+                } catch {
+                    log("\(subject): \(error.localizedDescription)")
+                }
+            }
+            await wait(1)
+            await shoot("20-pgp-\(subject.prefix(6).lowercased().replacingOccurrences(of: " ", with: "-"))", in: dir)
+        }
+
+        // An encrypted, signed reply: Encrypt is on because the message was encrypted, and it quotes the decrypted text.
+        await select { $0.email.subject == "Cipher settings" }
+        if var reply = store.replyDraft(all: false) {
+            reply.sign = true
+            reply.setHTML("<div>Got them, thank you. Thursday it is.</div>" + (reply.html ?? ""))
+            store.openWindow?(id: "compose", value: reply)
+            let compose = await window(titled: reply.subject)
+            await wait(3)
+            await shoot("21-encrypted-reply", in: dir)
+            compose?.close()
+            do {
+                guard let sealed = try await store.sealed(reply, forSending: true) else { return log("sealing was cancelled") }
+                let id = try await store.save(sealed)
+                try await store.send(sealed, savedAs: id)
+                log("encrypted reply sent: \(PGPKind.isMessage(sealed.body)), quote kept: \(reply.body.contains("Rotor order"))")
+            } catch {
+                log("encrypted reply failed: \(error.localizedDescription)")
+            }
+        }
+    }
+
+    /// With the server gone: the sidebar, list and an opened conversation from what's kept on this Mac.
+    private func offline(_ dir: URL, server: URL) async {
+        if let user2 = env["WREN_DEMO_USER2"], let password2 = env["WREN_DEMO_PASSWORD2"] {
+            store.add(JMAPClient(server: server, username: user2, password: password2))
+        }
+        await until { !store.conversations.isEmpty }
+        await wait(3)
+        await shoot("12-offline-list", in: dir)
+        await select { $0.count > 1 }
+        await shoot("13-offline-thread", in: dir)
         exit(0)
     }
 }

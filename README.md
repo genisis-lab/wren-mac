@@ -5,25 +5,45 @@ It signs in with an app password and talks to your Wren server over JMAP
 ([docs/jmap.md](https://github.com/genisis-lab/mail/blob/claude/wren-mail/docs/jmap.md)), so
 mail apps have to be turned on in Wren (Admin → Settings & policies → Security).
 
+- Several Wren accounts (Settings → Accounts), with All Inboxes at the top of the sidebar
 - Mailboxes, labels and shared mailboxes in the sidebar, with unread counts and a Dock badge
+- Opens with your mail showing, and shows what you've looked at when you're offline: the last list
+  of each mailbox and the 150 conversations you opened most recently are kept on your Mac
 - Conversations, search as you type with the matching words marked, and a reader that folds older messages
 - Archive, Trash, Junk, flag, read/unread, labels and snooze, from the toolbar, the Message
   menu, swipes and right-click; moves can be undone with ⌘Z
 - Compose in its own window: reply, reply all, forward (with attachments), attach files (or drop
   them on the window), send now or later; closing a window with changes saves it to Drafts
+- Formatting as you write: bold, italic, underline (⌘B, ⌘I, ⌘U), links (⌘K), bulleted and numbered
+  lists and quotes. It's sent as HTML with a plain-text copy, and replies keep the quoted message's HTML
+- Calendar invitations show a card with what, when, where and who's asking, and Accept, Maybe and
+  Decline (with a comment) send your answer to the organizer
+- Send as a private link that stops working after 1, 7 or 30 days, as on the web
+- PGP, the same as Wren on the web (Settings → Encryption): restore your key from the backup you made
+  in Wren, read encrypted mail (inline and PGP/MIME) and check signatures, and encrypt and sign what
+  you send when Wren knows a key for everyone you write to
 - Address suggestions as you type, from your Wren contacts and the mail you've loaded
 - Attachments: click to select, Space for Quick Look, double-click to open, drag to the Finder
 - Wren can be your default email app (Settings → General), so `mailto:` links open a new message
 - Out-of-office reply (Settings → Out of Office) and storage used (Settings → Account), with a
   warning in the sidebar when your mailbox is nearly full
 - Live updates over Wren's push stream, and a notification for new mail in your Inbox that opens
-  the conversation when you click it
+  the conversation when you click it, with Reply (type it right in the notification), Archive and
+  Mark as Read buttons
+- Conversations you've looked at show up in Spotlight (sender, subject and preview) and open in Wren
+- Share → Wren from any app: files become a new message with them attached (as when you drop them
+  on Wren's Dock icon), links and text a new message with them in it
+- A widget with the unread mail in each Inbox (small and medium; it needs a team, see Building)
+- Shortcuts: Send Email (opened to check, or sent straight away), Get Unread Count and Open Mailbox,
+  also from Spotlight and Siri
 - Mail's keyboard shortcuts (⌘N, ⌘R, ⇧⌘R, ⇧⌘F, ⇧⌘D, ⌃⌘A, ⇧⌘U, ⇧⌘L, ⇧⌘J, ⇧⌘N)
 
 ## Privacy and security
 
-- The app password is kept in your login keychain. The server address must be `https`
+- Each account's app password is kept in your login keychain. The server address must be `https`
   (plain `http` only works for `localhost`).
+- The mail kept for offline use is in `~/Library/Application Support/Wren/Cache`, one folder per
+  account, and is deleted when you remove the account.
 - HTML mail is shown with JavaScript off, no cookies or storage, and a Content-Security-Policy
   that blocks everything from the web until you click **Load Remote Content** (or turn it on
   in Settings → Viewing). Links open in your browser.
@@ -32,23 +52,49 @@ mail apps have to be turned on in Wren (Admin → Settings & policies → Securi
   parameters (`utm_*`, `fbclid` and the like) and known redirect wrappers before they open. These
   are the same rules as Wren on the web.
 - Attachments you open are saved with the quarantine flag, so Gatekeeper checks them.
+- The editor is a web page with its scripts off, so nothing in a quoted message runs, and nothing loads
+  from the web while you write.
+- PGP uses OpenPGP.js 6.3.2, the same as Wren on the web, built into the app (`Resources/pgp.js`, made
+  from `pgp/` with `npm ci && npm run build`); it's never downloaded. It runs in a hidden web page that
+  can't reach the network. Your private key is kept in your login keychain still protected by its
+  passphrase; the passphrase unlocks it in memory until you quit or choose Lock, and is never saved.
+  Encrypted mail is shown without remote pictures, and drafts written with Encrypt on are saved encrypted.
+- Spotlight's index of your conversations stays on your Mac, and each account's entries are deleted
+  when you remove the account.
 
 ## Building
 
 You need macOS 14 (Sonoma) or later and Xcode 16 or later.
 
-**To try it:** open `Package.swift` in Xcode, pick the **Wren** scheme and **My Mac**, and
-press ⌘R. Notifications need a real app bundle, so they're off when run this way.
+**To try it:** open `Wren.xcodeproj` in Xcode, pick the **Wren** scheme and **My Mac**, and
+press ⌘R.
 
 **To use it:** run `./bundle.sh`. It builds `build/Wren.app`, signed for your own Mac; drag
-it into Applications. The version it shows is `CFBundleShortVersionString` in
-`Info.plist`.
+it into Applications. The version it shows is `MARKETING_VERSION` in `project.yml`.
+
+The project is made from `project.yml` with [XcodeGen](https://github.com/yonaskolb/XcodeGen): after
+changing that file (or adding a source file), run `xcodegen generate`. CI does too, and commits the
+project when it changed. The mail engine (`Sources/WrenKit`) is a Swift package of its own, which the
+project uses. The app icon is drawn in `Design/AppIcon.svg` (Wren's web icon on the macOS icon grid);
+the PNGs in `Sources/Wren/Assets.xcassets` are made from it.
+
+**The widget needs your team ID.** The app hands the widget its unread counts through an App Group,
+and on the Mac an App Group's name starts with the team ID it's signed with. Signed for this Mac only
+(no team), there's no group, so the widget only says to open Wren. Sign with your team from a free or
+paid Apple Developer account, in Xcode (Signing & Capabilities, for each of the three targets) or with
+
+```sh
+TEAM=ABCDE12345 SIGN_IDENTITY="Apple Development" ./bundle.sh
+```
+
+The team is also written into the app and the widget (`WrenTeam` in their Info.plist), which is how
+they find the group.
 
 **To share it** with other people, sign it with a Developer ID certificate (from a paid
 Apple Developer account) and have Apple notarize it, or Gatekeeper will refuse to open it:
 
 ```sh
-SIGN_IDENTITY="Developer ID Application: Your Name (TEAMID)" ./bundle.sh
+TEAM=ABCDE12345 SIGN_IDENTITY="Developer ID Application" ./bundle.sh
 ditto -c -k --keepParent build/Wren.app build/Wren.zip
 xcrun notarytool submit build/Wren.zip --keychain-profile <profile> --wait
 xcrun stapler staple build/Wren.app
@@ -84,4 +130,5 @@ debug builds and only runs when `WREN_DEMO_OUT` is set.
 
 ## Not yet
 
-Several Wren sign-ins at once, an app icon and a rich-text editor.
+Pictures pasted on their own aren’t put in the message (attach them instead). Files you add with Encrypt on
+are encrypted when the message is sent, not as you add them (the web app does both).

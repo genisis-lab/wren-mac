@@ -21,14 +21,24 @@ public struct Draft: Codable, Hashable, Sendable, Identifiable {
     }
 
     public var id = UUID()
+    /// Which of the app's sign-ins the draft belongs to (the app sets it; the engine doesn't use it).
+    public var login: String?
     public var accountId: String
     public var identityId: String?
     public var to = ""
     public var cc = ""
     public var bcc = ""
     public var subject = ""
+    /// The message as plain text: the whole message, or the alternative to `html`.
     public var body = ""
+    /// The message with formatting, when it has any (set it with `setHTML`, which keeps `body` in step).
+    public var html: String?
     public var files: [File] = []
+    /// Send as a private link that stops working after 1, 7 or 30 days (Wren's extension).
+    public var privateLinkDays: Int?
+    /// Encrypt or sign with PGP when sent. Optional so drafts kept by older versions still open.
+    public var encrypt: Bool?
+    public var sign: Bool?
     public var inReplyTo: [String]?
     public var references: [String]?
     /// The saved draft this one was opened from, deleted when it's saved again or sent.
@@ -41,6 +51,12 @@ public struct Draft: Codable, Hashable, Sendable, Identifiable {
 
     public var recipients: [EmailAddress] {
         get throws { try Addresses.parse(to) + Addresses.parse(cc) + Addresses.parse(bcc) }
+    }
+
+    /// What the editor wrote, with the plain-text alternative made from it.
+    public mutating func setHTML(_ html: String) {
+        self.html = html
+        body = plainText(fromHTML: html)
     }
 
     /// The Email/set create object for this draft. Addresses that don't parse yet are left out rather than
@@ -58,6 +74,11 @@ public struct Draft: Codable, Hashable, Sendable, Identifiable {
             "bodyValues": ["body": ["value": .string(body)]],
             "attachments": .array(files.map { ["blobId": .string($0.blobId), "name": .string($0.name), "type": .string($0.type), "disposition": "attachment"] }),
         ]
+        // Text and HTML both, so the server sends multipart/alternative; plain text alone without formatting.
+        if let html {
+            o["htmlBody"] = [["partId": "html", "type": "text/html"]]
+            o["bodyValues"] = ["body": ["value": .string(body)], "html": ["value": .string(html)]]
+        }
         if let inReplyTo { o["inReplyTo"] = .array(inReplyTo.map(JSON.string)) }
         if let references { o["references"] = .array(references.map(JSON.string)) }
         return .object(o)
@@ -116,6 +137,7 @@ public struct Draft: Codable, Hashable, Sendable, Identifiable {
         let who = email.from?.first?.displayName ?? "someone"
         let when = email.receivedAt.map { "On \($0.formatted(date: .abbreviated, time: .shortened)), " } ?? ""
         d.body = signatureBlock(identity) + "\n\n\(when)\(who) wrote:\n\n" + quote(email.text)
+        d.html = html(fromText: signatureBlock(identity)) + quoted(email, intro: "\(when)\(who) wrote:")
         return d
     }
 
@@ -129,6 +151,7 @@ public struct Draft: Codable, Hashable, Sendable, Identifiable {
         if let date = email.receivedAt { header.append("Date: " + date.formatted(date: .long, time: .shortened)) }
         if let to = email.to, !to.isEmpty { header.append("To: " + to.map(\.formatted).joined(separator: ", ")) }
         d.body = signatureBlock(identity) + "\n\n" + header.joined(separator: "\n") + "\n\n" + email.text
+        d.html = html(fromText: signatureBlock(identity) + "\n\n" + header.joined(separator: "\n")) + quoted(email, intro: nil)
         // Wren copies another message's attachments into the draft, so they're sent along without downloading them.
         d.files = File.list(email.attachments)
         return d
@@ -142,6 +165,7 @@ public struct Draft: Codable, Hashable, Sendable, Identifiable {
         d.bcc = (email.bcc ?? []).map(\.formatted).joined(separator: ", ")
         d.subject = email.subject ?? ""
         d.body = email.text
+        d.html = email.html
         d.files = File.list(email.attachments)
         d.replaces = email.id
         return d
@@ -150,6 +174,18 @@ public struct Draft: Codable, Hashable, Sendable, Identifiable {
     private static func signatureBlock(_ identity: Identity?) -> String {
         guard let sig = identity?.textSignature?.trimmingCharacters(in: .whitespacesAndNewlines), !sig.isEmpty else { return "" }
         return "\n\n" + sig
+    }
+
+    /// Plain text as editor HTML: escaped, with line breaks kept.
+    public static func html(fromText text: String) -> String {
+        escapeHTML(text).replacingOccurrences(of: "\n", with: "<br>")
+    }
+
+    /// The message being answered, in a blockquote as the web app quotes it, trackers taken out.
+    static func quoted(_ email: Email, intro: String?) -> String {
+        let body = email.html.map { Trackers.strip($0).html } ?? "<pre style=\"white-space:pre-wrap;font-family:inherit\">\(escapeHTML(email.text))</pre>"
+        let lead = intro.map { "<div>\(escapeHTML($0))</div>" } ?? ""
+        return "<br><br><div class=\"wren-quote\">\(lead)<blockquote type=\"cite\" style=\"margin:0 0 0 .8ex;border-left:1px solid #ccc;padding-left:1ex\">\(body)</blockquote></div>"
     }
 
     static func prefixed(_ prefix: String, _ subject: String?) -> String {
@@ -237,15 +273,67 @@ public enum Addresses {
     }
 }
 
+func escapeHTML(_ text: String) -> String {
+    text.replacingOccurrences(of: "&", with: "&amp;").replacingOccurrences(of: "<", with: "&lt;").replacingOccurrences(of: ">", with: "&gt;").replacingOccurrences(of: "\"", with: "&quot;")
+}
+
+/// How a message uses PGP, as the web app tells: encrypted or signed, inline in the text or as PGP/MIME (RFC 3156).
+public enum PGPKind: Sendable, Equatable {
+    case encrypted, encryptedMIME, signed, signedMIME
+
+    private static let message = #"(?m)^[ \t]*-----BEGIN PGP MESSAGE-----[\s\S]*?^[ \t]*-----END PGP MESSAGE-----"#
+    private static let clearsigned = #"(?m)^[ \t]*-----BEGIN PGP SIGNED MESSAGE-----[\s\S]*?^[ \t]*-----END PGP SIGNATURE-----"#
+
+    public init?(_ email: Email) {
+        let types = Set((email.attachments ?? []).map { $0.type.lowercased() })
+        let text = email.text
+        if types.contains("application/pgp-encrypted") { self = .encryptedMIME }
+        else if Self.isMessage(text) { self = .encrypted }
+        else if types.contains("application/pgp-signature") { self = .signedMIME }
+        else if text.range(of: Self.clearsigned, options: .regularExpression) != nil { self = .signed }
+        else { return nil }
+    }
+
+    public var isEncrypted: Bool { self == .encrypted || self == .encryptedMIME }
+
+    /// Whether text holds an encrypted PGP message (an encrypted draft, say).
+    public static func isMessage(_ text: String) -> Bool {
+        text.range(of: message, options: .regularExpression) != nil
+    }
+
+    /// The armored block of an inline message: the encrypted one, or with `signed` the cleartext-signed one.
+    public static func armored(in text: String, signed: Bool = false) -> String? {
+        text.range(of: signed ? clearsigned : message, options: .regularExpression).map {
+            String(text[$0]).replacingOccurrences(of: "(?m)^[ \t]+", with: "", options: .regularExpression)
+        }
+    }
+
+    /// The part of a PGP/MIME message to read: the encrypted data, or the detached signature.
+    public func part(of email: Email) -> BodyPart? {
+        let list = email.attachments ?? []
+        switch self {
+        case .encryptedMIME: return list.first { $0.type.lowercased() != "application/pgp-encrypted" }
+        case .signedMIME: return list.first { $0.type.lowercased() == "application/pgp-signature" }
+        default: return nil
+        }
+    }
+}
+
 /// HTML as readable plain text, for quoting a reply and for messages without a text part.
 public func plainText(fromHTML html: String) -> String {
-    var s = html
+    var s = html.replacingOccurrences(of: "(?is)<(head|style|script|title)\\b.*?</\\1\\s*>|<!--.*?-->", with: "", options: .regularExpression)
+    // Quotes, innermost first, become "> " lines: what an encrypted reply (plain text only) has to show them by.
+    // Escaped again, so the steps below leave them as they are. Past 100 deep, quotes lose their marks.
+    for _ in 0..<100 {
+        guard let quote = s.range(of: "(?is)<blockquote\\b[^>]*>(?:(?!<blockquote\\b).)*?</blockquote\\s*>", options: .regularExpression) else { break }
+        let inner = s[quote].replacingOccurrences(of: "(?is)^<blockquote\\b[^>]*>|</blockquote\\s*>$", with: "", options: .regularExpression)
+        let lines = plainText(fromHTML: inner).split(separator: "\n", omittingEmptySubsequences: false)
+        s.replaceSubrange(quote, with: "<br>" + escapeHTML(lines.map { $0.isEmpty ? ">" : "> \($0)" }.joined(separator: "\n")) + "<br>")
+    }
     for (pattern, replacement) in [
-        ("(?is)<(head|style|script|title)\\b.*?</\\1\\s*>", ""),
         ("(?i)<br\\s*/?>", "\n"),
         ("(?i)</(p|div|tr|li|h[1-6]|blockquote|table)\\s*>", "\n"),
         ("(?i)<li\\b[^>]*>", "• "),
-        ("(?s)<!--.*?-->", ""),
         ("(?s)<[^>]+>", ""),
     ] {
         s = s.replacingOccurrences(of: pattern, with: replacement, options: .regularExpression)

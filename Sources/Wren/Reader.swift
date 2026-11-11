@@ -130,31 +130,42 @@ struct MessageView: View {
                 if email.isDraft, let draft = store.editDraft(email) {
                     Button("Edit Draft") { openWindow(id: "compose", value: draft) }
                 }
-                let allowRemote = loadRemote || loadRemoteAlways
-                // Tracking pictures are taken out before anything else sees the message.
-                let content = email.html.map(Trackers.strip)
-                if let html = content?.html, !allowRemote, hasRemoteContent(html) {
-                    HStack {
-                        Label("Remote content is hidden to protect your privacy.", systemImage: "eye.slash")
-                        Spacer()
-                        Button("Load Remote Content") { loadRemote = true }
-                    }
-                    .font(.callout)
-                    .padding(10)
-                    .background(.quaternary.opacity(0.6), in: RoundedRectangle(cornerRadius: 8))
+                if let invite = email.invite { InviteCard(email: email, invite: invite) }
+                if let kind = PGPKind(email) {
+                    PGPMessageView(email: email, kind: kind)
+                } else {
+                    plainMessage
                 }
-                if let removed = content?.removed, removed > 0 {
-                    Label(removed == 1 ? "1 tracker blocked" : "\(removed) trackers blocked", systemImage: "hand.raised")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .help("Wren removed pictures whose only job is to tell the sender when you open the message.")
-                }
-                MessageBody(email: email, html: content?.html, allowRemote: allowRemote)
-                if !email.files.isEmpty { AttachmentList(files: email.files) }
             }
         }
         .padding(.horizontal, 20)
         .padding(.vertical, 14)
+    }
+
+    /// A message without PGP, its remote content hidden until asked for.
+    @ViewBuilder
+    private var plainMessage: some View {
+        let allowRemote = loadRemote || loadRemoteAlways
+        // Tracking pictures are taken out before anything else sees the message.
+        let content = email.html.map(Trackers.strip)
+        if let html = content?.html, !allowRemote, hasRemoteContent(html) {
+            HStack {
+                Label("Remote content is hidden to protect your privacy.", systemImage: "eye.slash")
+                Spacer()
+                Button("Load Remote Content") { loadRemote = true }
+            }
+            .font(.callout)
+            .padding(10)
+            .background(.quaternary.opacity(0.6), in: RoundedRectangle(cornerRadius: 8))
+        }
+        if let removed = content?.removed, removed > 0 {
+            Label(removed == 1 ? "1 tracker blocked" : "\(removed) trackers blocked", systemImage: "hand.raised")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .help("Wren removed pictures whose only job is to tell the sender when you open the message.")
+        }
+        MessageBody(email: email, html: content?.html, allowRemote: allowRemote)
+        if !email.files.isEmpty { AttachmentList(files: email.files) }
     }
 
     /// Who, when and to whom; click to fold or open the message.
@@ -328,7 +339,7 @@ struct AttachmentList: View {
                     quickLook(file)
                     return .handled
                 }
-                .draggable(DraggedAttachment(part: file, account: store.selectedMailbox?.account ?? "", client: store.client))
+                .draggable(DraggedAttachment(part: file, account: store.fileSource?.account ?? "", client: store.fileSource?.client))
                 .help(name)
                 .contextMenu {
                     Button("Open") { Task { await store.openAttachment(file) } }

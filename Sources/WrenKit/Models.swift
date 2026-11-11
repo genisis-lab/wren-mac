@@ -10,6 +10,8 @@ public enum Capability {
     public static let quota = "urn:ietf:params:jmap:quota"
     public static let vacation = "urn:ietf:params:jmap:vacationresponse"
     public static let contacts = "urn:ietf:params:jmap:contacts"
+    /// Wren's own extension: calendar invitations, private links and PGP keys (docs/jmap.md in genisis-lab/mail).
+    public static let wren = "https://github.com/genisis-lab/mail/jmap"
 }
 
 public struct Session: Decodable, Sendable {
@@ -35,13 +37,15 @@ public struct Session: Decodable, Sendable {
     }
 }
 
-public struct Account: Hashable, Sendable, Identifiable {
+public struct Account: Codable, Hashable, Sendable, Identifiable {
     public var id: String
     public var name: String
     public var isPersonal: Bool
     public var capabilities: Set<String>
 
     public var canSnooze: Bool { capabilities.contains(Capability.snooze) }
+    /// Invitations, private links and PGP keys.
+    public var hasWren: Bool { capabilities.contains(Capability.wren) }
 }
 
 public struct EmailAddress: Codable, Hashable, Sendable {
@@ -74,6 +78,15 @@ public struct Mailbox: Codable, Hashable, Sendable, Identifiable {
     public var sortOrder: Int
     public var totalEmails: Int
     public var unreadEmails: Int
+
+    public init(id: String, name: String, role: String?, sortOrder: Int, totalEmails: Int, unreadEmails: Int) {
+        self.id = id
+        self.name = name
+        self.role = role
+        self.sortOrder = sortOrder
+        self.totalEmails = totalEmails
+        self.unreadEmails = unreadEmails
+    }
 }
 
 public struct Identity: Codable, Hashable, Sendable, Identifiable {
@@ -93,10 +106,24 @@ public struct BodyPart: Codable, Hashable, Sendable {
     public var type: String
     public var disposition: String?
     public var cid: String?
+
+    public init(partId: String? = nil, blobId: String? = nil, size: Int, name: String? = nil, type: String, disposition: String? = nil, cid: String? = nil) {
+        self.partId = partId
+        self.blobId = blobId
+        self.size = size
+        self.name = name
+        self.type = type
+        self.disposition = disposition
+        self.cid = cid
+    }
 }
 
 public struct BodyValue: Codable, Hashable, Sendable {
     public var value: String
+
+    public init(value: String) {
+        self.value = value
+    }
 }
 
 public struct Email: Codable, Hashable, Sendable, Identifiable {
@@ -119,6 +146,10 @@ public struct Email: Codable, Hashable, Sendable, Identifiable {
     public var htmlBody: [BodyPart]?
     public var attachments: [BodyPart]?
     public var bodyValues: [String: BodyValue]?
+    /// The raw message, which a PGP/MIME signature is checked against.
+    public var blobId: String?
+    /// The calendar invitation in the message (Wren's extension), if any.
+    public var invite: Invite?
 
     public var isUnread: Bool { keywords["$seen"] != true }
     public var isFlagged: Bool { keywords["$flagged"] == true }
@@ -145,8 +176,84 @@ public struct Email: Codable, Hashable, Sendable, Identifiable {
     }
 }
 
+/// A calendar invitation, as Wren's web app shows it (Email's "invite" property).
+public struct Invite: Codable, Hashable, Sendable {
+    public struct Person: Codable, Hashable, Sendable {
+        public var email: String
+        public var name: String?
+        /// ACCEPTED, TENTATIVE, DECLINED or NEEDS-ACTION, as the invitation has it.
+        public var status: String?
+    }
+
+    public enum Answer: String, CaseIterable, Sendable {
+        case accepted, tentative, declined
+
+        /// From the invitation's own spelling (ACCEPTED, TENTATIVE, DECLINED).
+        public init?(status: String?) {
+            guard let answer = status.flatMap({ Answer(rawValue: $0.lowercased()) }) else { return nil }
+            self = answer
+        }
+
+        public var button: String {
+            switch self {
+            case .accepted: "Accept"
+            case .tentative: "Maybe"
+            case .declined: "Decline"
+            }
+        }
+
+        public var sentence: String {
+            switch self {
+            case .accepted: "You’re going."
+            case .tentative: "You might go."
+            case .declined: "You declined."
+            }
+        }
+    }
+
+    /// REQUEST, CANCEL, REPLY…
+    public var method: String?
+    public var summary: String?
+    public var location: String?
+    public var start: Date?
+    public var end: Date?
+    public var allDay: Bool?
+    /// CONFIRMED, TENTATIVE or CANCELLED.
+    public var status: String?
+    public var organizer: Person?
+    public var me: Person?
+    /// The answer already sent from Wren.
+    public var rsvp: String?
+    /// Whether it can be answered (sent by its organizer, not cancelled, and addressed to you).
+    public var canReply: Bool?
+
+    public var isCancelled: Bool { method == "CANCEL" || status == "CANCELLED" }
+    /// The answer sent from Wren, or else the one the invitation lists for you.
+    public var answer: Answer? { Answer(status: rsvp) ?? Answer(status: me?.status) }
+
+    /// When, as one line: "Wed, Dec 16, 5:00 – 5:30 PM", or the days of an all-day event.
+    public func when(calendar: Calendar = .current) -> String? {
+        guard let start else { return nil }
+        if allDay == true {
+            // An all-day event ends at the start of the day after its last.
+            let last = end.map { $0.addingTimeInterval(-1) } ?? start
+            let days = calendar.isDate(start, inSameDayAs: last) ? nil : last
+            return days.map { (start..<max($0, start)).formatted(.interval.weekday().month().day()) } ?? start.formatted(.dateTime.weekday().month().day().year())
+        }
+        guard let end, end > start else { return start.formatted(.dateTime.weekday().month().day().hour().minute()) }
+        return (start..<end).formatted(.interval.weekday().month().day().hour().minute())
+    }
+}
+
+/// The person's private key as backed up in Wren on the web: still encrypted with their passphrase.
+public struct PgpBackup: Codable, Hashable, Sendable {
+    public var fingerprint: String
+    public var armored: String
+    public var updatedAt: Date?
+}
+
 /// A row of the message list: a conversation, shown by its newest message in the mailbox.
-public struct Conversation: Hashable, Sendable, Identifiable {
+public struct Conversation: Codable, Hashable, Sendable, Identifiable {
     public var email: Email
     public var count: Int
     /// Where a search matched, when the list is a search.
