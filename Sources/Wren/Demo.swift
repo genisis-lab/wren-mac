@@ -28,23 +28,23 @@ struct Demo: ViewModifier {
         }
     }
 
-    /// Each window on its own (`screencapture -l`), and the whole screen for menus and panels.
-    private func shoot(_ name: String, in dir: URL) {
-        let tag = env["WREN_DEMO_TAG"] ?? "light"
+    /// Ask the workflow for pictures of each window and the whole screen, and wait for them. The workflow takes
+    /// them because it has the Screen Recording permission; an app opened through Launch Services doesn't.
+    private func shoot(_ name: String, in dir: URL) async {
+        let base = dir.appending(path: "\(env["WREN_DEMO_TAG"] ?? "light")-\(name)")
         let windows = NSApp.windows.filter { $0.isVisible && $0.frame.width > 200 }
-        for (i, window) in windows.enumerated() {
-            capture(["-x", "-o", "-l", String(window.windowNumber), dir.appending(path: "\(tag)-\(name)-\(i).png").path])
+        let request = windows.map { "\($0.windowNumber)\n" }.joined()
+        let temporary = dir.appending(path: ".\(name).tmp")
+        try? request.write(to: temporary, atomically: true, encoding: .utf8)
+        try? FileManager.default.moveItem(at: temporary, to: base.appendingPathExtension("request"))
+        let done = base.appendingPathExtension("done")
+        var tries = 0
+        while !FileManager.default.fileExists(atPath: done.path), tries < 100 {
+            await wait(0.2)
+            tries += 1
         }
-        capture(["-x", dir.appending(path: "\(tag)-\(name)-screen.png").path])
+        try? FileManager.default.removeItem(at: done)
         print("demo: \(name): \(windows.map(\.title))")
-    }
-
-    private func capture(_ arguments: [String]) {
-        let p = Process()
-        p.executableURL = URL(fileURLWithPath: "/usr/sbin/screencapture")
-        p.arguments = arguments
-        try? p.run()
-        p.waitUntilExit()
     }
 
     private func select(_ match: (Conversation) -> Bool) async {
@@ -60,26 +60,26 @@ struct Demo: ViewModifier {
         NSApp.windows.first?.setFrame(NSRect(x: 40, y: 80, width: 1200, height: 760), display: true)
         await until { store.phase != .starting }
         await wait(1.5)
-        shoot("01-signin", in: dir)
+        await shoot("01-signin", in: dir)
 
         guard let server = env["WREN_DEMO_SERVER"].flatMap(URL.init(string:)), let user = env["WREN_DEMO_USER"], let password = env["WREN_DEMO_PASSWORD"]
         else { exit(1) }
         store.begin(JMAPClient(server: server, username: user, password: password))
         await until { !store.conversations.isEmpty && store.quota != nil }
         await wait(1.5)
-        shoot("02-inbox", in: dir)
+        await shoot("02-inbox", in: dir)
 
         await select { $0.count > 1 }
-        shoot("03-thread", in: dir)
+        await shoot("03-thread", in: dir)
         await select { $0.email.subject?.contains("variable") == true }
-        shoot("04-html-trackers", in: dir)
+        await shoot("04-html-trackers", in: dir)
         await select { $0.email.subject?.contains("Quarterly") == true }
-        shoot("05-attachment", in: dir)
+        await shoot("05-attachment", in: dir)
 
         store.search = "lunch"
         await until { store.conversations.contains { $0.snippet != nil } }
         await wait(1.5)
-        shoot("06-search", in: dir)
+        await shoot("06-search", in: dir)
         store.search = ""
 
         // What a notification click does: from another mailbox, straight to the conversation in the Inbox.
@@ -91,7 +91,7 @@ struct Demo: ViewModifier {
             store.show(lunch.id, in: MailboxRef(account: account, mailbox: inbox.id))
             await until { store.thread.first?.threadId == lunch.id }
             await wait(2)
-            shoot("07-notification-click", in: dir)
+            await shoot("07-notification-click", in: dir)
         }
 
         // Typing in To: suggestions from contacts and from mail.
@@ -102,7 +102,7 @@ struct Demo: ViewModifier {
             // The To field has focus when the window opens; type into it as the keyboard would.
             (compose.firstResponder as? NSTextView)?.insertText("gr", replacementRange: NSRange(location: NSNotFound, length: 0))
             await wait(2)
-            shoot("08-compose-suggestions", in: dir)
+            await shoot("08-compose-suggestions", in: dir)
             compose.close()
         }
 
@@ -111,14 +111,14 @@ struct Demo: ViewModifier {
             _ = try? await NSWorkspace.shared.open([link], withApplicationAt: Bundle.main.bundleURL, configuration: NSWorkspace.OpenConfiguration())
         }
         await wait(3)
-        shoot("09-mailto", in: dir)
+        await shoot("09-mailto", in: dir)
         NSApp.windows.filter { $0.title.contains("Hello from a link") }.forEach { $0.close() }
 
         for tab in ["general", "account", "vacation", "viewing"] {
             UserDefaults.standard.set(tab, forKey: "settingsTab")
             openSettings()
             await wait(2)
-            shoot("10-settings-\(tab)", in: dir)
+            await shoot("10-settings-\(tab)", in: dir)
         }
         exit(0)
     }
