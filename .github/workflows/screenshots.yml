@@ -47,10 +47,14 @@ jobs:
         run: |
           KEY=$(node -e 'console.log(require("./wren/.github/screens/creds.json").key)')
           mkdir -p shots
+          # Windows from the last run aren't brought back.
+          defaults write io.github.genisis-lab.wren ApplePersistenceIgnoreState -bool true
           for mode in light dark; do
             dark=0; [ $mode = dark ] && dark=1
-            WREN_DEMO_OUT=$PWD/shots WREN_DEMO_TAG=$mode WREN_DEMO_DARK=$dark WREN_DEMO_SERVER=http://127.0.0.1:8787 \
-              WREN_DEMO_USER=admin@wren.test WREN_DEMO_PASSWORD=$KEY build/Wren.app/Contents/MacOS/Wren || echo "app exited with $?"
+            # Through Launch Services, as from the Finder, so the app is frontmost and mailto: links reach it.
+            open -W --stdout app.log --stderr app.log --env WREN_DEMO_OUT=$PWD/shots --env WREN_DEMO_TAG=$mode --env WREN_DEMO_DARK=$dark \
+              --env WREN_DEMO_SERVER=http://127.0.0.1:8787 --env WREN_DEMO_USER=admin@wren.test --env WREN_DEMO_PASSWORD=$KEY build/Wren.app || echo "app exited with $?"
+            cat app.log
           done
           ls shots
       - uses: actions/upload-artifact@v7

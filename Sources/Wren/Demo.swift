@@ -97,10 +97,14 @@ struct Demo: ViewModifier {
         // Typing in To: suggestions from contacts and from mail.
         if let draft = store.newDraft() { openWindow(id: "compose", value: draft) }
         await wait(2.5)
-        (NSApp.keyWindow?.firstResponder as? NSTextView)?.insertText("gr", replacementRange: NSRange(location: NSNotFound, length: 0))
-        await wait(2)
-        shoot("08-compose-suggestions", in: dir)
-        NSApp.keyWindow?.close()
+        if let compose = NSApp.windows.first(where: { $0.isVisible && $0.title == "New Message" }) {
+            compose.makeKeyAndOrderFront(nil)
+            // The To field has focus when the window opens; type into it as the keyboard would.
+            (compose.firstResponder as? NSTextView)?.insertText("gr", replacementRange: NSRange(location: NSNotFound, length: 0))
+            await wait(2)
+            shoot("08-compose-suggestions", in: dir)
+            compose.close()
+        }
 
         // A mailto: link from another app, through Launch Services like a real one.
         if let link = URL(string: "mailto:grace@example.com?subject=Hello%20from%20a%20link&body=Hi%20Grace%2C") {

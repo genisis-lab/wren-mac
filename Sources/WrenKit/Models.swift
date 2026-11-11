@@ -177,8 +177,9 @@ public struct SearchSnippet: Codable, Hashable, Sendable {
         return out
     }
 
+    /// One line of text, as the list shows it.
     private static func unescape(_ s: Substring) -> String {
-        var s = String(s)
+        var s = s.replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
         for (entity, ch) in [("&lt;", "<"), ("&gt;", ">"), ("&quot;", "\""), ("&#39;", "'"), ("&amp;", "&")] {
             s = s.replacingOccurrences(of: entity, with: ch)
         }

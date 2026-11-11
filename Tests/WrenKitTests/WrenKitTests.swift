@@ -237,7 +237,7 @@ final class WrenKitTests: XCTestCase {
         let pieces = SearchSnippet.pieces("…lunch on <mark>Friday</mark> &amp; <mark>fish</mark>")
         XCTAssertEqual(pieces.map(\.text), ["…lunch on ", "Friday", " & ", "fish"])
         XCTAssertEqual(pieces.map(\.isMatch), [false, true, false, true])
-        XCTAssertEqual(SearchSnippet.pieces("a &lt;b&gt;").map(\.text), ["a <b>"])
+        XCTAssertEqual(SearchSnippet.pieces("a &lt;b&gt;\n\nc").map(\.text), ["a <b> c"])
     }
 
     func testVacationPatchSendsOnlyChanges() {
