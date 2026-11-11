@@ -1,8 +1,9 @@
 # Wren for Mac
 
-A native Mac mail app for Wren, written in SwiftUI. It signs in with an app password and
-talks to your Wren server over JMAP ([docs/jmap.md](../../docs/jmap.md)), so mail apps
-have to be turned on in Wren (Admin → Settings & policies → Security).
+A native Mac mail app for [Wren](https://github.com/genisis-lab/mail), written in SwiftUI.
+It signs in with an app password and talks to your Wren server over JMAP
+([docs/jmap.md](https://github.com/genisis-lab/mail/blob/claude/wren-mail/docs/jmap.md)), so
+mail apps have to be turned on in Wren (Admin → Settings & policies → Security).
 
 - Mailboxes, labels and shared mailboxes in the sidebar, with unread counts and a Dock badge
 - Conversations, search as you type, and a reader that folds older messages
@@ -30,7 +31,8 @@ You need macOS 14 (Sonoma) or later and Xcode 16 or later.
 press ⌘R. Notifications need a real app bundle, so they're off when run this way.
 
 **To use it:** run `./bundle.sh`. It builds `build/Wren.app`, signed for your own Mac; drag
-it into Applications.
+it into Applications. The version it shows is `CFBundleShortVersionString` in
+`Info.plist`.
 
 **To share it** with other people, sign it with a Developer ID certificate (from a paid
 Apple Developer account) and have Apple notarize it, or Gatekeeper will refuse to open it:
@@ -55,7 +57,8 @@ swift test
 ```
 
 `LiveServerTests` also runs everything the app does against a real Wren server, when you
-give it one with mail in its inbox. Use a test server: it sends, snoozes and deletes.
+give it one with mail in its inbox. Use a test server (such as Wren run locally from its own
+repo): it sends, snoozes and deletes.
 
 ```sh
 WREN_SERVER=http://localhost:8787 WREN_USER=you@example.com WREN_APP_PASSWORD=wren_… swift test
