@@ -193,16 +193,19 @@ struct Demo: ViewModifier {
 
         await select { $0.email.subject == "Invitation: Planning review" }
         await shoot("18-invite", in: dir)
-        if let email = store.thread.last, email.invite != nil {
+        // The first pass answers it; a second pass on the same server finds it answered, above the reply.
+        if let email = store.thread.last(where: { $0.invite != nil }), email.invite?.rsvp == nil {
             do {
                 let to = try await store.answer(email, .accepted, comment: "See you there.")
                 log("invite answered, sent to \(to ?? "nobody")")
             } catch {
                 log("invite answer failed: \(error.localizedDescription)")
             }
-            await until { store.thread.last?.invite?.rsvp != nil }
+            await until { store.thread.first { $0.id == email.id }?.invite?.rsvp != nil }
             await wait(1.5)
             await shoot("19-invite-answered", in: dir)
+        } else if let rsvp = store.thread.last(where: { $0.invite != nil })?.invite?.rsvp {
+            log("invitation already answered: \(rsvp)")
         } else {
             log("no invitation on the message (a server without Wren's extension?)")
         }
