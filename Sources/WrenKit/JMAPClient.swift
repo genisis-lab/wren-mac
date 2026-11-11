@@ -107,7 +107,7 @@ public actor JMAPClient {
         return session
     }
 
-    private func currentSession() async throws -> Session {
+    func currentSession() async throws -> Session {
         if let session { return session }
         return try await connect()
     }
@@ -133,7 +133,7 @@ public actor JMAPClient {
         let session = try await currentSession()
         // The optional ones only when the server has them: naming one it doesn't know fails the whole request.
         let using = [Capability.core, Capability.mail, Capability.submission]
-            + [Capability.snooze, Capability.quota, Capability.vacation, Capability.contacts].filter { session.capabilities[$0] != nil }
+            + [Capability.snooze, Capability.quota, Capability.vacation, Capability.contacts, Capability.wren].filter { session.capabilities[$0] != nil }
         let body: JSON = [
             "using": .array(using.map(JSON.string)),
             "methodCalls": .array(calls.enumerated().map { i, c in [.string(c.0), c.1, .string(String(i))] }),
@@ -158,7 +158,7 @@ public actor JMAPClient {
 
     public func download(_ part: BodyPart, account: String) async throws -> Data {
         let session = try await currentSession()
-        guard let blobId = part.blobId else { throw JMAPError.badResponse }
+        guard let blobId = part.blobId, !blobId.isEmpty else { throw JMAPError.badResponse }
         let link = expand(session.downloadUrl, ["accountId": account, "blobId": blobId, "name": part.name ?? "attachment", "type": part.type])
         guard let url = URL(string: link) else { throw JMAPError.badResponse }
         return try await send(URLRequest(url: url))

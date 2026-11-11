@@ -2,10 +2,10 @@ import Foundation
 
 /// What the message list shows of each conversation.
 let listProperties: JSON = ["threadId", "mailboxIds", "keywords", "from", "to", "subject", "receivedAt", "preview", "hasAttachment"]
-/// What the reader needs of each message.
-let fullProperties: JSON = [
+/// What the reader needs of each message (and the invitation in it, from a server with Wren's extension).
+let fullProperties = [
     "threadId", "mailboxIds", "keywords", "from", "to", "cc", "bcc", "replyTo", "subject", "receivedAt", "preview", "hasAttachment",
-    "messageId", "references", "textBody", "htmlBody", "attachments", "bodyValues",
+    "messageId", "references", "textBody", "htmlBody", "attachments", "bodyValues", "blobId",
 ]
 
 extension JMAPClient {
@@ -53,11 +53,13 @@ extension JMAPClient {
     /// Every message of a conversation, oldest first, with bodies.
     public func conversation(account: String, threadId: String) async throws -> [Email] {
         let a = JSON.string(account)
+        // Asking for "invite" without the capability fails the request.
+        let properties = try await fullProperties + (currentSession().capabilities[Capability.wren] != nil ? ["invite"] : [])
         let r = try await call([
             ("Thread/get", ["accountId": a, "ids": [.string(threadId)]]),
             ("Email/get", [
                 "accountId": a, "#ids": ["resultOf": "0", "name": "Thread/get", "path": "/list/0/emailIds"],
-                "properties": fullProperties, "fetchAllBodyValues": true,
+                "properties": .array(properties.map(JSON.string)), "fetchAllBodyValues": true,
             ]),
         ])
         return try (r[1]["list"] ?? []).decode([Email].self)
@@ -135,9 +137,11 @@ extension JMAPClient {
         return id
     }
 
-    /// Send a saved draft now, or hold it until `sendAt` (scheduled send), and file it in Sent.
-    public func submit(emailId: String, account: String, identity: Identity, recipients: [EmailAddress], sendAt: Date? = nil, draftsMailbox: String, sentMailbox: String) async throws {
+    /// Send a saved draft now, or hold it until `sendAt` (scheduled send), and file it in Sent. With `privateLinkDays`
+    /// (1, 7 or 30; Wren's extension) it goes out as a private link that stops working after that many days.
+    public func submit(emailId: String, account: String, identity: Identity, recipients: [EmailAddress], sendAt: Date? = nil, privateLinkDays: Int? = nil, draftsMailbox: String, sentMailbox: String) async throws {
         var submission: [String: JSON] = ["identityId": .string(identity.id), "emailId": .string(emailId)]
+        if let privateLinkDays { submission["privateLinkDays"] = .number(Double(privateLinkDays)) }
         if let sendAt {
             submission["envelope"] = [
                 "mailFrom": ["email": .string(identity.email), "parameters": ["HOLDUNTIL": .string(utcDate(sendAt))]],
@@ -152,6 +156,33 @@ extension JMAPClient {
             ]),
         ])
         try checkSet(r[0])
+    }
+}
+
+// MARK: Wren's extension
+
+extension JMAPClient {
+    /// Answer the invitation in an email, as the web app's invite card does. Returns who the answer went to.
+    public func answer(invite emailId: String, _ answer: Invite.Answer, comment: String = "", account: String) async throws -> String? {
+        var args: [String: JSON] = ["accountId": .string(account), "emailId": .string(emailId), "status": .string(answer.rawValue)]
+        let comment = comment.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !comment.isEmpty { args["comment"] = .string(comment) }
+        let r = try await call([("Invite/reply", .object(args))])
+        return r[0]["to"]?.string
+    }
+
+    /// The public keys Wren knows for each address (armored), lower-cased addresses as keys.
+    public func pgpKeys(for addresses: [String], account: String) async throws -> [String: [String]] {
+        let wanted = Array(Set(addresses.map { $0.lowercased() })).sorted()
+        guard !wanted.isEmpty else { return [:] }
+        let r = try await call([("PgpKey/lookup", ["accountId": .string(account), "addresses": .array(wanted.map(JSON.string))])])
+        return (r[0]["keys"]?.object ?? [:]).mapValues { ($0.array ?? []).compactMap { $0["armored"]?.string } }
+    }
+
+    /// The private key backup made in Wren on the web (still passphrase-protected), if there is one. Own account only.
+    public func pgpBackup(account: String) async throws -> PgpBackup? {
+        let r = try await call([("PgpBackup/get", ["accountId": .string(account), "ids": nil])])
+        return try r[0]["list"]?.array?.first?.decode(PgpBackup.self)
     }
 }
 
