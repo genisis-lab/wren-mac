@@ -19,8 +19,8 @@ if [ -n "${SIGN_IDENTITY:-}" ]; then
 else
   set -- CODE_SIGN_IDENTITY=- DEVELOPMENT_TEAM=
 fi
-xcodebuild -project Wren.xcodeproj -scheme Wren -configuration "$CONFIGURATION" -derivedDataPath build/DerivedData \
-  -quiet "$@" build
+xcodebuild -project Wren.xcodeproj -scheme Wren -configuration "$CONFIGURATION" -destination generic/platform=macOS \
+  -derivedDataPath build/DerivedData -quiet "$@" build
 
 rm -rf build/Wren.app
 cp -R "build/DerivedData/Build/Products/$CONFIGURATION/Wren.app" build/Wren.app

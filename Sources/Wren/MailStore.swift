@@ -434,6 +434,20 @@ final class MailStore {
         show(found.threadId, in: MailboxRef(login: login.id, account: found.account, mailbox: here.id))
     }
 
+    /// Whether the first sign-in is connected (or has what was kept from last time), waiting up to 10 seconds; for
+    /// Shortcuts, which can launch Wren before its window has started the sign-ins.
+    func ready() async -> Bool {
+        restore()
+        for _ in 0..<50 {
+            if let login = logins.first, let personal = login.personal, login.identities[personal.id] != nil, login.mailboxes[personal.id] != nil {
+                return true
+            }
+            if phase == .signedOut { return false }
+            try? await Task.sleep(for: .milliseconds(200))
+        }
+        return false
+    }
+
     /// A folder of the first sign-in's own account, or All Inboxes for the Inbox when there are several (Shortcuts).
     func select(role: String) {
         if role == "inbox", logins.count > 1 {
