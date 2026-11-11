@@ -24,10 +24,12 @@
 		68FF34E21E69B542F75868FE /* WrenApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 491A1C435E9204F6A121EEA8 /* WrenApp.swift */; };
 		7274DAB5B30B98E028368E77 /* RichEditor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49C3187356636C6A68E72E9D /* RichEditor.swift */; };
 		75887D874B944C3A8C77DDF8 /* SignInView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D8640C94B63DEACBFF9889BF /* SignInView.swift */; };
+		7E9540E81E552780BB7C3E62 /* Sparkle in Frameworks */ = {isa = PBXBuildFile; productRef = E219EEE32D5458637712FDAA /* Sparkle */; };
 		7EF6B08CC4630358737A013D /* Keychain.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0C821E8ADA0F57FFE65CCE8 /* Keychain.swift */; };
 		8CD26BB822215DA91E21BAAF /* WrenKit in Frameworks */ = {isa = PBXBuildFile; productRef = 6E881E8313000AC062F7A2D9 /* WrenKit */; };
 		8CF3B03504E2BD1B9D15FFD1 /* ConversationList.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1ABA3B4BA24FB561FE333168 /* ConversationList.swift */; };
 		902CB540957C56464BE82E99 /* OpenPGP.js LICENSE (LGPL-3.0).txt in Resources */ = {isa = PBXBuildFile; fileRef = 86746A82D57839174F40D61C /* OpenPGP.js LICENSE (LGPL-3.0).txt */; };
+		9617B3F23E608D0FC5D24F92 /* Updates.swift in Sources */ = {isa = PBXBuildFile; fileRef = ABEC626D53C7A267F87F52BB /* Updates.swift */; };
 		9F07A6D8FDE147AB3816E17E /* pgp.html in Resources */ = {isa = PBXBuildFile; fileRef = 7C78688BEF761F0EB27D30C8 /* pgp.html */; };
 		AE730F455432D94B5411436E /* Spotlight.swift in Sources */ = {isa = PBXBuildFile; fileRef = BA3BFA6A524076149F0CF248 /* Spotlight.swift */; };
 		B734BC6E9D04543DD43E346D /* Intents.swift in Sources */ = {isa = PBXBuildFile; fileRef = F7587AC264198D098A01C1EC /* Intents.swift */; };
@@ -99,6 +101,7 @@
 		A3D34C60B8A69FE2104BE560 /* UnreadMail.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UnreadMail.swift; sourceTree = "<group>"; };
 		A51E1B2227FE679BBE83CF98 /* Reader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Reader.swift; sourceTree = "<group>"; };
 		A6D840FC08F84FC0AB49A6E9 /* SecureMessage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SecureMessage.swift; sourceTree = "<group>"; };
+		ABEC626D53C7A267F87F52BB /* Updates.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Updates.swift; sourceTree = "<group>"; };
 		AC706752F0F219CB8D9CCB84 /* Demo.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Demo.swift; sourceTree = "<group>"; };
 		BA3BFA6A524076149F0CF248 /* Spotlight.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Spotlight.swift; sourceTree = "<group>"; };
 		C8C26B8B47D74D725883757C /* MessageWebView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MessageWebView.swift; sourceTree = "<group>"; };
@@ -118,6 +121,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				8CD26BB822215DA91E21BAAF /* WrenKit in Frameworks */,
+				7E9540E81E552780BB7C3E62 /* Sparkle in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -144,6 +148,7 @@
 				5AE9374267B2F608CB3509EF /* SettingsView.swift */,
 				D8640C94B63DEACBFF9889BF /* SignInView.swift */,
 				BA3BFA6A524076149F0CF248 /* Spotlight.swift */,
+				ABEC626D53C7A267F87F52BB /* Updates.swift */,
 				491A1C435E9204F6A121EEA8 /* WrenApp.swift */,
 				2A40665DD12A36EA52C4045A /* Resources */,
 			);
@@ -285,6 +290,7 @@
 			name = Wren;
 			packageProductDependencies = (
 				6E881E8313000AC062F7A2D9 /* WrenKit */,
+				E219EEE32D5458637712FDAA /* Sparkle */,
 			);
 			productName = Wren;
 			productReference = 771DF2C89DAF5F2DD43F1864 /* Wren.app */;
@@ -323,6 +329,7 @@
 			mainGroup = 6650F3086C8037D02858D51B;
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
+				B800174745FD99466A76EA68 /* XCRemoteSwiftPackageReference "Sparkle" */,
 				C242ACEB4BC744F5677E3821 /* XCLocalSwiftPackageReference "." */,
 			);
 			preferredProjectObjectVersion = 77;
@@ -394,6 +401,7 @@
 				75887D874B944C3A8C77DDF8 /* SignInView.swift in Sources */,
 				AE730F455432D94B5411436E /* Spotlight.swift in Sources */,
 				52C16A03F29CA6F46A2B9A2C /* UnreadMail.swift in Sources */,
+				9617B3F23E608D0FC5D24F92 /* Updates.swift in Sources */,
 				68FF34E21E69B542F75868FE /* WrenApp.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -527,6 +535,7 @@
 				ONLY_ACTIVE_ARCH = YES;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = macosx;
+				SPARKLE_PUBLIC_KEY = "";
 				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
 				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
 				SWIFT_VERSION = 5.0;
@@ -606,6 +615,7 @@
 				MTL_FAST_MATH = YES;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = macosx;
+				SPARKLE_PUBLIC_KEY = "";
 				SWIFT_COMPILATION_MODE = wholemodule;
 				SWIFT_OPTIMIZATION_LEVEL = "-O";
 				SWIFT_VERSION = 5.0;
@@ -693,10 +703,26 @@
 		};
 /* End XCLocalSwiftPackageReference section */
 
+/* Begin XCRemoteSwiftPackageReference section */
+		B800174745FD99466A76EA68 /* XCRemoteSwiftPackageReference "Sparkle" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/sparkle-project/Sparkle";
+			requirement = {
+				kind = exactVersion;
+				version = 2.10.1;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
 /* Begin XCSwiftPackageProductDependency section */
 		6E881E8313000AC062F7A2D9 /* WrenKit */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = WrenKit;
+		};
+		E219EEE32D5458637712FDAA /* Sparkle */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = B800174745FD99466A76EA68 /* XCRemoteSwiftPackageReference "Sparkle" */;
+			productName = Sparkle;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

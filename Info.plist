@@ -44,6 +44,10 @@
 			</array>
 		</dict>
 	</array>
+	<key>SUFeedURL</key>
+	<string>https://github.com/genisis-lab/wren-mac/releases/latest/download/appcast.xml</string>
+	<key>SUPublicEDKey</key>
+	<string>$(SPARKLE_PUBLIC_KEY)</string>
 	<key>WrenTeam</key>
 	<string>$(DEVELOPMENT_TEAM)</string>
 	<key>LSApplicationCategoryType</key>

@@ -8,6 +8,7 @@ import WrenKit
 struct WrenApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @State private var store = MailStore.shared
+    @State private var updates = Updates.shared
 
     var body: some Scene {
         Window("Wren", id: "main") {
@@ -15,7 +16,10 @@ struct WrenApp: App {
                 .environment(store)
         }
         .defaultSize(width: 1100, height: 700)
-        .commands { MailCommands(store: store) }
+        .commands {
+            MailCommands(store: store)
+            UpdateCommands(updates: updates)
+        }
         // Links and files are the app delegate's: SwiftUI would otherwise rebuild this window for each one.
         .handlesExternalEvents(matching: [])
 

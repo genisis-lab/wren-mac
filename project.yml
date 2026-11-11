@@ -17,9 +17,15 @@ settings:
     DEVELOPMENT_TEAM: ""
     ENABLE_DEBUG_DYLIB: NO
     DEAD_CODE_STRIPPING: YES
+    # Sparkle's public key (SUPublicEDKey), from `generate_keys` (README.md, Releases). Paste it here, or set the
+    # SPARKLE_PUBLIC_KEY repository variable, which the release workflow uses instead. Without it, no updates.
+    SPARKLE_PUBLIC_KEY: ""
 packages:
   WrenKit:
     path: .
+  Sparkle:
+    url: https://github.com/sparkle-project/Sparkle
+    exactVersion: 2.10.1
 targets:
   Wren:
     type: application
@@ -29,6 +35,7 @@ targets:
       - Sources/Shared
     dependencies:
       - package: WrenKit
+      - package: Sparkle
       - target: WrenWidget
       - target: WrenShare
     settings:
