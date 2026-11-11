@@ -2,17 +2,43 @@ name: CI
 on:
   push:
   pull_request:
+defaults:
+  run:
+    # -eo pipefail, so a failure piped through tee still fails the step.
+    shell: bash
 jobs:
   build:
     runs-on: macos-15
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v7
-      - name: Build and test
+      - name: Test the engine
+        run: |
+          swift build --build-tests 2>&1 | tee engine.log
+          swift test --skip-build
+      - name: Make the Xcode project from project.yml
+        run: |
+          HOMEBREW_NO_AUTO_UPDATE=1 brew install xcodegen
+          xcodegen generate
+      - name: Build the app, widget and Share extension
         run: |
           status=0
-          { swift build --build-tests && swift test --skip-build; } 2>&1 | tee build.log || status=$?
-          # Compiler errors and warnings also show as annotations on the pull request.
-          grep -E '^/[^:]+:[0-9]+:[0-9]+: (error|warning): ' build.log | sort -u | sed -E "s#^$GITHUB_WORKSPACE/##; s#^([^:]+):([0-9]+):([0-9]+): (error|warning): (.*)\$#::\\4 file=\\1,line=\\2,col=\\3::\\5#" || true
-          # The app target only exists on macOS; make sure it was built, not just the engine.
-          test -x "$(swift build --show-bin-path)/Wren"
+          ./bundle.sh 2>&1 | tee app.log || status=$?
+          # Compiler and build-tool errors and warnings also show as annotations on the pull request.
+          { grep -hE '^/[^:]+:[0-9]+:[0-9]+: (error|warning): ' engine.log app.log | sort -u \
+              | sed -E "s#^$GITHUB_WORKSPACE/##; s#^([^:]+):([0-9]+):([0-9]+): (error|warning): (.*)\$#::\\4 file=\\1,line=\\2,col=\\3::\\5#"
+            grep -hE '^([a-z]+: )?(error|warning): ' engine.log app.log | sort -u | sed -E 's#^([a-z]+: )?(error|warning): (.*)$#::\2::\1\3#'; } || true
+          test -d build/Wren.app/Contents/PlugIns/WrenWidget.appex
+          test -d build/Wren.app/Contents/PlugIns/WrenShare.appex
           exit $status
+      # So the project can be opened in Xcode without XcodeGen. A push from here doesn't start another run.
+      - name: Commit the project when project.yml changed it
+        if: github.event_name == 'push'
+        run: |
+          git add -A Wren.xcodeproj
+          git diff --cached --quiet && exit 0
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -qm "Regenerate Wren.xcodeproj from project.yml"
+          git push origin "HEAD:$GITHUB_REF_NAME" || echo "::warning::Wren.xcodeproj is out of date; the branch moved before it could be pushed"

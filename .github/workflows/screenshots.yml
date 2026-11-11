@@ -41,7 +41,10 @@ jobs:
           cat server.log
           test -f .github/screens/creds.json
       - name: Build the app (debug, which has the screenshot driver)
-        run: CONFIG=debug ./bundle.sh
+        run: |
+          HOMEBREW_NO_AUTO_UPDATE=1 brew install xcodegen
+          xcodegen generate
+          CONFIG=debug ./bundle.sh
       - name: Take screenshots
         timeout-minutes: 10
         run: |

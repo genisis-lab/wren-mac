@@ -1,4 +1,5 @@
 import AppKit
+import CoreSpotlight
 import SwiftUI
 import UserNotifications
 import WrenKit
@@ -36,27 +37,27 @@ struct WrenApp: App {
 final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDelegate {
     func applicationWillFinishLaunching(_ notification: Notification) {
         // Before launch ends, so the click on a notification that launched Wren arrives here.
-        if MailStore.canNotify { UNUserNotificationCenter.current().delegate = self }
+        guard MailStore.canNotify else { return }
+        UNUserNotificationCenter.current().delegate = self
+        UNUserNotificationCenter.current().setNotificationCategories([MailStore.newMail])
     }
 
-    func applicationDidFinishLaunching(_ notification: Notification) {
-        // A bare `swift run` binary starts as a background process; make it a regular app with a Dock icon.
-        NSApp.setActivationPolicy(.regular)
-        NSApp.activate()
-    }
-
-    /// mailto: links from other apps (Wren is registered for them in Info.plist).
+    /// mailto: links from other apps, and files to send (Wren is registered for both in Info.plist; the Share
+    /// extension opens them here too).
     func application(_ application: NSApplication, open urls: [URL]) {
         for url in urls where url.scheme?.lowercased() == "mailto" { MailStore.shared.openMailto(url) }
+        let files = urls.filter(\.isFileURL)
+        if !files.isEmpty { MailStore.shared.openFiles(files) }
     }
 
-    /// Clicking a new-mail notification opens that conversation.
-    nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse, withCompletionHandler completionHandler: @escaping () -> Void) {
+    /// A new-mail notification: clicking it opens the conversation; its buttons archive, mark read or reply.
+    nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse) async {
         let info = response.notification.request.content.userInfo
-        if let login = info["login"] as? String, let account = info["account"] as? String, let mailbox = info["mailbox"] as? String, let thread = info["thread"] as? String {
-            Task { @MainActor in MailStore.shared.show(thread, in: MailboxRef(login: login, account: account, mailbox: mailbox)) }
-        }
-        completionHandler()
+        guard let login = info["login"] as? String, let account = info["account"] as? String, let mailbox = info["mailbox"] as? String,
+              let thread = info["thread"] as? String else { return }
+        let action = response.actionIdentifier
+        let text = (response as? UNTextInputNotificationResponse)?.userText
+        await MailStore.shared.notificationAction(action, thread: thread, in: MailboxRef(login: login, account: account, mailbox: mailbox), reply: text)
     }
 }
 
@@ -79,6 +80,10 @@ struct RootView: View {
         // And if one comes here anyway, this window takes it as it is (without these SwiftUI rebuilt it for each
         // mailto: link, losing its size and selection).
         .handlesExternalEvents(preferring: ["*"], allowing: ["*"])
+        .onContinueUserActivity(CSSearchableItemActionType) { activity in
+            guard let id = activity.userInfo?[CSSearchableItemActivityIdentifier] as? String else { return }
+            Task { await store.showFound(id) }
+        }
         #if DEBUG
         .modifier(Demo())
         #endif
