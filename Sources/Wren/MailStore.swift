@@ -18,6 +18,9 @@ struct NotConnected: LocalizedError {
 @MainActor
 @Observable
 final class MailStore {
+    /// The one store: the app delegate needs it too, for links and notifications.
+    static let shared = MailStore()
+
     enum Phase { case starting, signedOut, signedIn }
 
     var phase = Phase.starting
@@ -27,6 +30,8 @@ final class MailStore {
     private(set) var accounts: [Account] = []
     private(set) var mailboxes: [String: [Mailbox]] = [:]
     private(set) var identities: [String: [Identity]] = [:]
+    /// Storage used and allowed in your own account, when the server says.
+    private(set) var quota: Quota?
 
     var selectedMailbox: MailboxRef?
     var selectedThreads: Set<String> = []
@@ -48,6 +53,14 @@ final class MailStore {
     var confirmingDelete: Set<String>?
 
     @ObservationIgnored var undoManager: UndoManager?
+    /// For windows opened from outside a window: mailto: links and notifications. Set by the main window.
+    @ObservationIgnored var openWindow: OpenWindowAction? {
+        didSet { openPending() }
+    }
+    /// mailto: links that came before Wren was signed in and ready.
+    @ObservationIgnored private var pendingLinks: [URL] = []
+    /// A conversation to select once the mailbox being shown has loaded (from a notification).
+    @ObservationIgnored private var openAfterLoad: String?
     @ObservationIgnored private var limit = 50
     @ObservationIgnored private var listGeneration = 0
     @ObservationIgnored private var listening: Task<Void, Never>?
@@ -76,6 +89,9 @@ final class MailStore {
     var currentRole: String? { mailbox(selectedMailbox)?.role }
 
     var currentAccount: Account? { accounts.first { $0.id == selectedMailbox?.account } }
+
+    /// Your own account (shared mailboxes have no storage limit, out-of-office reply or contacts of their own).
+    var personalAccount: Account? { accounts.first(where: \.isPersonal) }
 
     // MARK: Signing in
 
@@ -111,6 +127,7 @@ final class MailStore {
         accounts = []
         mailboxes = [:]
         identities = [:]
+        quota = nil
         selectedMailbox = nil
         selectedThreads = []
         conversations = []
@@ -126,7 +143,7 @@ final class MailStore {
         phase = .signedOut
     }
 
-    private func begin(_ client: JMAPClient) {
+    func begin(_ client: JMAPClient) {
         self.client = client
         phase = .signedIn
         listening?.cancel()
@@ -142,6 +159,7 @@ final class MailStore {
                 let session = try await client.connect()
                 accounts = session.mailAccounts
                 for account in accounts { identities[account.id] = try await client.identities(account: account.id) }
+                openPending()
                 delay = 2
                 // Wren sends the current state as soon as the stream opens, so this also loads everything.
                 try await client.listen { [weak self] in await self?.refresh() }
@@ -171,6 +189,7 @@ final class MailStore {
                 await loadList()
             }
             if let threadId { await loadThread(threadId) }
+            if let personal = personalAccount, personal.capabilities.contains(Capability.quota) { quota = try await client.quota(account: personal.id) }
             problem = nil
             updateDockBadge()
             await notifyNewMail()
@@ -181,7 +200,8 @@ final class MailStore {
 
     /// Show the selected mailbox from the top.
     func showMailbox() async {
-        selectedThreads = []
+        selectedThreads = openAfterLoad.map { [$0] } ?? []
+        openAfterLoad = nil
         conversations = []
         total = 0
         limit = 50
@@ -404,12 +424,56 @@ final class MailStore {
         NSWorkspace.shared.accessibilityDisplayShouldReduceMotion ? nil : .smooth(duration: 0.3)
     }
 
+    /// Bring up a conversation in a mailbox, such as new mail whose notification was clicked.
+    func show(_ threadId: String, in ref: MailboxRef) {
+        search = ""
+        if selectedMailbox == ref {
+            selectedThreads = [threadId]
+        } else {
+            // Changing mailbox clears the selection when the list loads; this one is selected then.
+            openAfterLoad = threadId
+            selectedMailbox = ref
+        }
+        if let openWindow { openWindow(id: "main") }
+        NSApp.activate()
+    }
+
     // MARK: Writing
 
     var replyTarget: Email? { thread.last { !$0.isDraft } }
 
     /// Reply and Forward go with the selection, as the other actions do, and answer the newest message once it's loaded.
     var canReply: Bool { selectedThreads.count == 1 && currentRole != "drafts" }
+
+    /// A message from a mailto: link (another app, or a link in a message), once Wren is ready to write one.
+    func openMailto(_ link: URL) {
+        pendingLinks.append(link)
+        openPending()
+    }
+
+    private func openPending() {
+        guard let openWindow, let account = personalAccount ?? accounts.first, identities[account.id] != nil, !pendingLinks.isEmpty else { return }
+        for link in pendingLinks {
+            openWindow(id: "compose", value: Draft.mailto(link, account: account.id, identity: identities[account.id]?.first))
+        }
+        pendingLinks = []
+        NSApp.activate()
+    }
+
+    /// Addresses for what's being typed in a To, Cc or Bcc field: your contacts on the server first,
+    /// then people in the mail already loaded.
+    func suggestions(for text: String) async -> [EmailAddress] {
+        let text = text.trimmingCharacters(in: .whitespaces)
+        guard text.count >= 2 else { return [] }
+        var found: [EmailAddress] = []
+        if let client, let personal = personalAccount, personal.capabilities.contains(Capability.contacts) {
+            found = (try? await client.contacts(matching: text, account: personal.id)) ?? []
+        }
+        let seen = (conversations.map(\.email) + thread).flatMap { ($0.from ?? []) + ($0.to ?? []) + ($0.cc ?? []) }
+        found += seen.filter { $0.email.localizedCaseInsensitiveContains(text) || ($0.name ?? "").localizedCaseInsensitiveContains(text) }
+        var emails = Set<String>()
+        return Array(found.filter { emails.insert($0.email.lowercased()).inserted }.prefix(8))
+    }
 
     func newDraft(to: String = "") -> Draft? {
         guard let account = selectedMailbox?.account ?? accounts.first?.id else { return nil }
@@ -473,6 +537,19 @@ final class MailStore {
         return Draft.File(blobId: blob.blobId, name: url.lastPathComponent, type: blob.type, size: blob.size)
     }
 
+    // MARK: Out of office
+
+    /// The out-of-office reply, if the server offers one.
+    func vacation() async throws -> VacationResponse? {
+        guard let client, let personal = personalAccount, personal.capabilities.contains(Capability.vacation) else { return nil }
+        return try await client.vacation(account: personal.id)
+    }
+
+    func saveVacation(_ reply: VacationResponse, was old: VacationResponse) async throws {
+        guard let client, let personal = personalAccount else { throw NotConnected() }
+        try await client.setVacation(reply, was: old, account: personal.id)
+    }
+
     // MARK: Attachments
 
     func download(_ part: BodyPart) async throws -> Data {
@@ -480,19 +557,30 @@ final class MailStore {
         return try await client.download(part, account: ref.account)
     }
 
-    private static func fileName(_ part: BodyPart) -> String {
+    nonisolated private static func fileName(_ part: BodyPart) -> String {
         let name = (part.name ?? "").replacingOccurrences(of: "/", with: "-").replacingOccurrences(of: ":", with: "-").trimmingCharacters(in: .whitespaces)
         return name.isEmpty ? "Attachment" : name
     }
 
-    /// Open with its app. Files the app writes are quarantined (LSFileQuarantineEnabled), so Gatekeeper checks them first.
+    /// A copy in a temporary folder, to open, preview or drag out. Files the app writes are quarantined
+    /// (LSFileQuarantineEnabled), so Gatekeeper checks them before they open.
+    nonisolated static func temporaryFile(_ part: BodyPart, account: String, client: JMAPClient) async throws -> URL {
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent("Wren").appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        let url = folder.appendingPathComponent(fileName(part))
+        try await client.download(part, account: account).write(to: url)
+        return url
+    }
+
+    func temporaryFile(_ part: BodyPart) async throws -> URL {
+        guard let client, let ref = selectedMailbox else { throw NotConnected() }
+        return try await Self.temporaryFile(part, account: ref.account, client: client)
+    }
+
+    /// Open with its app.
     func openAttachment(_ part: BodyPart) async {
         do {
-            let folder = FileManager.default.temporaryDirectory.appendingPathComponent("Wren").appendingPathComponent(UUID().uuidString)
-            try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-            let url = folder.appendingPathComponent(Self.fileName(part))
-            try await download(part).write(to: url)
-            NSWorkspace.shared.open(url)
+            NSWorkspace.shared.open(try await temporaryFile(part))
         } catch {
             alert = error.localizedDescription
         }
@@ -542,6 +630,8 @@ final class MailStore {
             content.subtitle = email.subject ?? ""
             content.body = email.preview ?? ""
             content.sound = .default
+            // Clicking it opens the conversation (AppDelegate).
+            content.userInfo = ["account": account.id, "mailbox": inbox.id, "thread": email.threadId]
             try? await UNUserNotificationCenter.current().add(UNNotificationRequest(identifier: email.id, content: content, trigger: nil))
         }
     }

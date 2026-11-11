@@ -1,11 +1,12 @@
 import AppKit
 import SwiftUI
+import UserNotifications
 import WrenKit
 
 @main
 struct WrenApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
-    @State private var store = MailStore()
+    @State private var store = MailStore.shared
 
     var body: some Scene {
         Window("Wren", id: "main") {
@@ -14,12 +15,16 @@ struct WrenApp: App {
         }
         .defaultSize(width: 1100, height: 700)
         .commands { MailCommands(store: store) }
+        // Links and files are the app delegate's: SwiftUI would otherwise rebuild this window for each one.
+        .handlesExternalEvents(matching: [])
 
         WindowGroup("New Message", id: "compose", for: Draft.self) { $draft in
             ComposeView(value: $draft)
                 .environment(store)
         }
         .defaultSize(width: 640, height: 560)
+        // mailto: links go to the app delegate, which fills in the message; never a blank window from here.
+        .handlesExternalEvents(matching: [])
 
         Settings {
             SettingsView()
@@ -28,16 +33,36 @@ struct WrenApp: App {
     }
 }
 
-final class AppDelegate: NSObject, NSApplicationDelegate {
+final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDelegate {
+    func applicationWillFinishLaunching(_ notification: Notification) {
+        // Before launch ends, so the click on a notification that launched Wren arrives here.
+        if MailStore.canNotify { UNUserNotificationCenter.current().delegate = self }
+    }
+
     func applicationDidFinishLaunching(_ notification: Notification) {
         // A bare `swift run` binary starts as a background process; make it a regular app with a Dock icon.
         NSApp.setActivationPolicy(.regular)
         NSApp.activate()
     }
+
+    /// mailto: links from other apps (Wren is registered for them in Info.plist).
+    func application(_ application: NSApplication, open urls: [URL]) {
+        for url in urls where url.scheme?.lowercased() == "mailto" { MailStore.shared.openMailto(url) }
+    }
+
+    /// Clicking a new-mail notification opens that conversation.
+    nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse, withCompletionHandler completionHandler: @escaping () -> Void) {
+        let info = response.notification.request.content.userInfo
+        if let account = info["account"] as? String, let mailbox = info["mailbox"] as? String, let thread = info["thread"] as? String {
+            Task { @MainActor in MailStore.shared.show(thread, in: MailboxRef(account: account, mailbox: mailbox)) }
+        }
+        completionHandler()
+    }
 }
 
 struct RootView: View {
     @Environment(MailStore.self) private var store
+    @Environment(\.openWindow) private var openWindow
 
     var body: some View {
         Group {
@@ -47,7 +72,16 @@ struct RootView: View {
             case .signedIn: MainView()
             }
         }
-        .onAppear { store.restore() }
+        .onAppear {
+            store.openWindow = openWindow
+            store.restore()
+        }
+        // And if one comes here anyway, this window takes it as it is (without these SwiftUI rebuilt it for each
+        // mailto: link, losing its size and selection).
+        .handlesExternalEvents(preferring: ["*"], allowing: ["*"])
+        #if DEBUG
+        .modifier(Demo())
+        #endif
     }
 }
 

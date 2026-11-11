@@ -21,6 +21,9 @@ struct ComposeView: View {
     @State private var sendAt = Date.now.addingTimeInterval(3600)
     /// Sent or deleted: nothing to save on close.
     @State private var done = false
+    /// Addresses for what's being typed in the focused address field, and the one Return picks.
+    @State private var suggestions: [EmailAddress] = []
+    @State private var suggestion = 0
     @FocusState private var focus: Field?
 
     enum Field: Hashable { case to, cc, bcc, subject, body }
@@ -34,6 +37,20 @@ struct ComposeView: View {
     }
 
     private var identities: [Identity] { store.identities[draft.accountId] ?? [] }
+
+    private func address(_ field: Field?) -> Binding<String>? {
+        switch field {
+        case .to: $draft.to
+        case .cc: $draft.cc
+        case .bcc: $draft.bcc
+        default: nil
+        }
+    }
+
+    /// The address being typed, in whichever address field has focus.
+    private var typing: String {
+        address(focus).map { Addresses.typing($0.wrappedValue) } ?? ""
+    }
 
     private var canSend: Bool {
         !busy && uploading == 0 && ((try? draft.recipients.isEmpty) == false)
@@ -87,6 +104,21 @@ struct ComposeView: View {
             }
         }
         .background(Color(nsColor: .textBackgroundColor))
+        // Files dropped anywhere on the window are attached.
+        .dropDestination(for: URL.self) { urls, _ in
+            let files = urls.filter(\.isFileURL)
+            attach(.success(files))
+            return !files.isEmpty
+        }
+        .task(id: "\(String(describing: focus)) \(typing)") {
+            try? await Task.sleep(for: .milliseconds(150))
+            let text = typing
+            let found = await store.suggestions(for: text)
+            guard !Task.isCancelled else { return }
+            // Nothing to suggest once the whole address is there.
+            suggestions = found.filter { $0.email.caseInsensitiveCompare(text) != .orderedSame && $0.formatted != text }
+            suggestion = 0
+        }
         .navigationTitle(draft.subject.isEmpty ? "New Message" : draft.subject)
         .toolbar {
             ToolbarItemGroup(placement: .navigation) {
@@ -157,11 +189,20 @@ struct ComposeView: View {
                 return error.localizedDescription
             }
         }()
+        let suggesting = focus == field && !suggestions.isEmpty
         return row(label) {
             TextField(String(label.dropLast()), text: text)
                 .textFieldStyle(.plain)
                 .labelsHidden()
                 .focused($focus, equals: field)
+                .onKeyPress(.downArrow) { pick(suggestion + 1) }
+                .onKeyPress(.upArrow) { pick(suggestion - 1) }
+                .onKeyPress(.escape) {
+                    guard suggesting else { return .ignored }
+                    suggestions = []
+                    return .handled
+                }
+                .onSubmit { if suggesting { accept(suggestions[min(suggestion, suggestions.count - 1)]) } }
             if let problem {
                 Image(systemName: "exclamationmark.circle.fill")
                     .foregroundStyle(.red)
@@ -174,6 +215,56 @@ struct ComposeView: View {
                     .help("Add a Bcc field")
             }
         }
+        // The suggestions hang below the field (lined up with it, past the label), over the rows after it.
+        .overlay(alignment: .topLeading) {
+            if suggesting {
+                GeometryReader { row in
+                    suggestionList.fixedSize(horizontal: false, vertical: true).offset(x: 80, y: row.size.height)
+                }
+            }
+        }
+        .zIndex(suggesting ? 1 : 0)
+    }
+
+    private var suggestionList: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            ForEach(Array(suggestions.enumerated()), id: \.offset) { i, address in
+                let on = i == suggestion
+                Button { accept(address) } label: {
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text(address.displayName).lineLimit(1)
+                        if address.name?.isEmpty == false {
+                            Text(address.email).font(.caption).lineLimit(1).foregroundStyle(on ? AnyShapeStyle(.white.opacity(0.85)) : AnyShapeStyle(.secondary))
+                        }
+                    }
+                    .foregroundStyle(on ? AnyShapeStyle(.white) : AnyShapeStyle(.primary))
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .background(on ? Color.accentColor : .clear, in: RoundedRectangle(cornerRadius: 5))
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(address.formatted)
+            }
+        }
+        .padding(5)
+        .frame(width: 340)
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 8))
+        .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(Color(nsColor: .separatorColor)))
+        .shadow(color: .black.opacity(0.15), radius: 8, y: 4)
+    }
+
+    private func pick(_ index: Int) -> KeyPress.Result {
+        guard !suggestions.isEmpty, address(focus) != nil else { return .ignored }
+        suggestion = (index + suggestions.count) % suggestions.count
+        return .handled
+    }
+
+    private func accept(_ choice: EmailAddress) {
+        guard let field = address(focus) else { return }
+        field.wrappedValue = Addresses.complete(field.wrappedValue, with: choice)
+        suggestions = []
     }
 
     private var files: some View {

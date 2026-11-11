@@ -138,10 +138,10 @@ struct ConversationRow: View {
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
                 }
-                Text(subject)
+                Text(conversation.snippet?.subject.map(highlighted) ?? AttributedString(subject))
                     .font(.subheadline)
                     .lineLimit(1)
-                Text(email.preview ?? "")
+                Text(conversation.snippet?.preview.map(highlighted) ?? AttributedString(email.preview ?? ""))
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
                     .lineLimit(2)
@@ -150,6 +150,18 @@ struct ConversationRow: View {
         .padding(.vertical, 4)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(accessibilityText)
+    }
+
+    /// The words a search matched, marked as Mail marks them.
+    private func highlighted(_ markup: String) -> AttributedString {
+        SearchSnippet.pieces(markup).reduce(into: AttributedString()) { text, piece in
+            var part = AttributedString(piece.text)
+            if piece.isMatch {
+                part[AttributeScopes.SwiftUIAttributes.BackgroundColorAttribute.self] = Color.yellow.opacity(0.4)
+                part[AttributeScopes.SwiftUIAttributes.ForegroundColorAttribute.self] = Color.primary
+            }
+            text += part
+        }
     }
 
     private var accessibilityText: String {

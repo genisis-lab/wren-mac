@@ -25,20 +25,29 @@ extension JMAPClient {
         let words = search.trimmingCharacters(in: .whitespacesAndNewlines)
         if !words.isEmpty { filter["text"] = .string(words) }
         let a = JSON.string(account)
-        let r = try await call([
+        var calls: [(String, JSON)] = [
             ("Email/query", [
                 "accountId": a, "filter": .object(filter), "sort": [["property": "receivedAt", "isAscending": false]],
                 "collapseThreads": true, "limit": .number(Double(limit)), "calculateTotal": true,
             ]),
             ("Email/get", ["accountId": a, "#ids": ["resultOf": "0", "name": "Email/query", "path": "/ids"], "properties": listProperties]),
             ("Thread/get", ["accountId": a, "#ids": ["resultOf": "1", "name": "Email/get", "path": "/list/*/threadId"]]),
-        ])
+        ]
+        // A search also asks where each message matched, to mark the words in the list.
+        if !words.isEmpty {
+            calls.append(("SearchSnippet/get", ["accountId": a, "filter": .object(filter), "#emailIds": ["resultOf": "0", "name": "Email/query", "path": "/ids"]]))
+        }
+        let r = try await call(calls)
         let emails = try (r[1]["list"] ?? []).decode([Email].self)
         var counts: [String: Int] = [:]
         for t in r[2]["list"]?.array ?? [] {
             if let id = t["id"]?.string { counts[id] = t["emailIds"]?.array?.count }
         }
-        return (emails.map { Conversation(email: $0, count: counts[$0.threadId] ?? 1) }, r[0]["total"]?.int ?? emails.count)
+        var snippets: [String: SearchSnippet] = [:]
+        for s in r[3]["list"]?.array ?? [] {
+            if let id = s["emailId"]?.string { snippets[id] = SearchSnippet(subject: s["subject"]?.string, preview: s["preview"]?.string) }
+        }
+        return (emails.map { Conversation(email: $0, count: counts[$0.threadId] ?? 1, snippet: snippets[$0.id]) }, r[0]["total"]?.int ?? emails.count)
     }
 
     /// Every message of a conversation, oldest first, with bodies.
@@ -65,6 +74,40 @@ extension JMAPClient {
             ]),
         ])
         return try (r[1]["list"] ?? []).decode([Email].self)
+    }
+
+    /// The out-of-office reply, for an account with the vacationresponse capability.
+    public func vacation(account: String) async throws -> VacationResponse {
+        let r = try await call([("VacationResponse/get", ["accountId": .string(account)])])
+        guard let reply = r[0]["list"]?.array?.first else { throw JMAPError.badResponse }
+        return try reply.decode(VacationResponse.self)
+    }
+
+    public func setVacation(_ reply: VacationResponse, was old: VacationResponse, account: String) async throws {
+        let r = try await call([("VacationResponse/set", ["accountId": .string(account), "update": ["singleton": reply.patch(from: old)]])])
+        try checkSet(r[0])
+    }
+
+    /// Storage used and allowed, for an account with the quota capability (nil if the server sets no limit in bytes).
+    public func quota(account: String) async throws -> Quota? {
+        let r = try await call([("Quota/get", ["accountId": .string(account)])])
+        return try (r[0]["list"]?.array ?? []).first { $0["resourceType"]?.string == "octets" }?.decode(Quota.self)
+    }
+
+    /// Address book entries matching what's typed (RFC 9610), best first, as addresses.
+    public func contacts(matching text: String, account: String) async throws -> [EmailAddress] {
+        let a = JSON.string(account)
+        let r = try await call([
+            ("ContactCard/query", ["accountId": a, "filter": ["text": .string(text)], "limit": 10]),
+            ("ContactCard/get", ["accountId": a, "#ids": ["resultOf": "0", "name": "ContactCard/query", "path": "/ids"]]),
+        ])
+        let order = (r[0]["ids"]?.array ?? []).compactMap(\.string)
+        let cards = Dictionary((r[1]["list"]?.array ?? []).compactMap { c in c["id"]?.string.map { ($0, c) } }, uniquingKeysWith: { a, _ in a })
+        return order.compactMap { cards[$0] }.flatMap { card -> [EmailAddress] in
+            let name = card["name"]?["full"]?.string
+            // A card's addresses are keyed by id; sorted so they come out the same way each time.
+            return (card["emails"]?.object ?? [:]).sorted { $0.key < $1.key }.compactMap { $0.value["address"]?.string }.map { EmailAddress(name: name, email: $0) }
+        }
     }
 
     /// Apply patches (email id → PatchObject); throws if any is refused.

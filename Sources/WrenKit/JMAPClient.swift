@@ -131,8 +131,9 @@ public actor JMAPClient {
     /// Make method calls in one request. Call `i` has the id "i", for result references.
     public func call(_ calls: [(String, JSON)]) async throws -> Responses {
         let session = try await currentSession()
-        var using = [Capability.core, Capability.mail, Capability.submission]
-        if session.capabilities[Capability.snooze] != nil { using.append(Capability.snooze) }
+        // The optional ones only when the server has them: naming one it doesn't know fails the whole request.
+        let using = [Capability.core, Capability.mail, Capability.submission]
+            + [Capability.snooze, Capability.quota, Capability.vacation, Capability.contacts].filter { session.capabilities[$0] != nil }
         let body: JSON = [
             "using": .array(using.map(JSON.string)),
             "methodCalls": .array(calls.enumerated().map { i, c in [.string(c.0), c.1, .string(String(i))] }),
