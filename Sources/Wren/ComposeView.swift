@@ -215,9 +215,13 @@ struct ComposeView: View {
                     .help("Add a Bcc field")
             }
         }
-        // The suggestions hang below the field, over the rows after it.
-        .overlay(alignment: .bottomLeading) {
-            if suggesting { suggestionList.alignmentGuide(.bottom) { $0[.top] }.padding(.leading, 80) }
+        // The suggestions hang below the field (lined up with it, past the label), over the rows after it.
+        .overlay(alignment: .topLeading) {
+            if suggesting {
+                GeometryReader { row in
+                    suggestionList.fixedSize(horizontal: false, vertical: true).offset(x: 80, y: row.size.height)
+                }
+            }
         }
         .zIndex(suggesting ? 1 : 0)
     }

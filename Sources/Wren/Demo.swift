@@ -6,17 +6,24 @@ import WrenKit
 /// The screenshot run (.github/workflows/screenshots.yml), in debug builds only and only when WREN_DEMO_OUT is set:
 /// signs in to a test server, walks through the app's screens and saves each window as a PNG.
 struct Demo: ViewModifier {
-    @Environment(MailStore.self) private var store
-    @Environment(\.openWindow) private var openWindow
     @Environment(\.openSettings) private var openSettings
     private let env = ProcessInfo.processInfo.environment
+    private var store: MailStore { .shared }
+    @MainActor private static var started = false
 
     func body(content: Content) -> some View {
-        content.task {
-            guard let out = env["WREN_DEMO_OUT"] else { return }
-            await run(URL(fileURLWithPath: out))
-        }
+        content
+            .onAppear {
+                guard !Self.started, let out = env["WREN_DEMO_OUT"] else { return }
+                Self.started = true
+                // Not .task, which SwiftUI cancels whenever it rebuilds the view: every wait after that returns at once.
+                Task { @MainActor in await run(URL(fileURLWithPath: out)) }
+            }
+            .onDisappear { if Self.started { log("the main window's view went away") } }
     }
+
+    /// Straight to the log, unbuffered, so the workflow sees how far the walk got even if the app stops.
+    private func log(_ line: String) { FileHandle.standardOutput.write(Data("demo: \(line)\n".utf8)) }
 
     private func wait(_ seconds: Double) async { try? await Task.sleep(for: .seconds(seconds)) }
 
@@ -44,11 +51,11 @@ struct Demo: ViewModifier {
             tries += 1
         }
         try? FileManager.default.removeItem(at: done)
-        print("demo: \(name): \(windows.map(\.title))")
+        log("\(name): \(windows.map(\.title))")
     }
 
     private func select(_ match: (Conversation) -> Bool) async {
-        guard let c = store.conversations.first(where: match) else { return print("demo: no such conversation") }
+        guard let c = store.conversations.first(where: match) else { return log("no such conversation") }
         store.selectedThreads = [c.id]
         await until { store.thread.first?.threadId == c.id }
         await wait(2.5)
@@ -95,7 +102,7 @@ struct Demo: ViewModifier {
         }
 
         // Typing in To: suggestions from contacts and from mail.
-        if let draft = store.newDraft() { openWindow(id: "compose", value: draft) }
+        if let draft = store.newDraft() { store.openWindow?(id: "compose", value: draft) }
         await wait(2.5)
         if let compose = NSApp.windows.first(where: { $0.isVisible && $0.title == "New Message" }) {
             compose.makeKeyAndOrderFront(nil)
