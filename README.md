@@ -36,6 +36,8 @@ mail apps have to be turned on in Wren (Admin → Settings & policies → Securi
 - A widget with the unread mail in each Inbox (small and medium; it needs a team, see Building)
 - Shortcuts: Send Email (opened to check, or sent straight away), Get Unread Count and Open Mailbox,
   also from Spotlight and Siri
+- Updates itself (Wren → Check for Updates…, and a daily check once you allow it), from this
+  repository's releases
 - Mail's keyboard shortcuts (⌘N, ⌘R, ⇧⌘R, ⇧⌘F, ⇧⌘D, ⌃⌘A, ⇧⌘U, ⇧⌘L, ⇧⌘J, ⇧⌘N)
 
 ## Privacy and security
@@ -100,8 +102,73 @@ xcrun notarytool submit build/Wren.zip --keychain-profile <profile> --wait
 xcrun stapler staple build/Wren.app
 ```
 
-(`xcrun notarytool store-credentials` creates the keychain profile once.) The app isn't
-sandboxed, so it can't go on the Mac App Store as it is.
+(`xcrun notarytool store-credentials` creates the keychain profile once.) Releases do all of this for you,
+see below. The app isn't sandboxed, so it can't go on the Mac App Store as it is.
+
+## Releases
+
+Pushing a version tag makes a release. `.github/workflows/release.yml` builds Wren, signs it with your Developer ID
+and the hardened runtime, has Apple notarize it, staples the ticket, and publishes a GitHub release with
+`Wren-<version>.zip` and `appcast.xml`, the feed [Sparkle](https://sparkle-project.org) reads. Wren checks
+`https://github.com/genisis-lab/wren-mac/releases/latest/download/appcast.xml` for updates, and installs only
+updates signed with your Sparkle key. Until the secrets below are there, a tag makes no release and the run says
+which are missing. The signing keys stay with you and GitHub; they're never in the repository.
+
+You need a paid Apple Developer account. Once, on your Mac:
+
+1. **Make Sparkle's update key.** It signs every update.
+
+   ```sh
+   curl -LO https://github.com/sparkle-project/Sparkle/releases/download/2.10.1/Sparkle-2.10.1.tar.xz
+   mkdir Sparkle && tar -xJf Sparkle-2.10.1.tar.xz -C Sparkle
+   ./Sparkle/bin/generate_keys                              # keeps the private key in your login keychain, prints the public key
+   ./Sparkle/bin/generate_keys -x sparkle-private-key.txt   # a copy of the private key, for GitHub
+   ```
+
+   Keep the "Private key for signing Sparkle updates" item in your keychain: without that key, Wrens already
+   installed can't be updated.
+
+2. **Get a Developer ID certificate.** In Xcode → Settings → Accounts, choose your team, then Manage Certificates →
+   + → Developer ID Application. In Keychain Access (login → My Certificates), right-click "Developer ID Application:
+   …", choose Export, and save it as `developer-id.p12` with a password. Your team ID is under Membership details at
+   developer.apple.com/account.
+
+3. **Make a notarization key.** In App Store Connect → Users and Access → Integrations → App Store Connect API →
+   Team Keys, add a key with the Developer role and download `AuthKey_<key id>.p8` (it can only be downloaded once).
+   Note its Key ID, and the Issuer ID above the list. (Or notarize with your Apple ID: make an app-specific password
+   at account.apple.com → Sign-In and Security, and set `APPLE_ID` and `APPLE_APP_PASSWORD` instead of the three
+   `NOTARY_` secrets.)
+
+4. **Add them to the repository**, with the [GitHub CLI](https://cli.github.com) signed in, from your clone of
+   wren-mac (or by hand in Settings → Secrets and variables → Actions):
+
+   ```sh
+   gh secret set SPARKLE_PRIVATE_KEY < sparkle-private-key.txt
+   gh variable set SPARKLE_PUBLIC_KEY --body "$(./Sparkle/bin/generate_keys -p)"
+   base64 -i developer-id.p12 | gh secret set MACOS_CERTIFICATE
+   gh secret set MACOS_CERTIFICATE_PASSWORD            # it asks for the .p12 password
+   gh secret set APPLE_TEAM_ID --body ABCDE12345
+   gh secret set NOTARY_KEY < AuthKey_XXXXXXXXXX.p8
+   gh secret set NOTARY_KEY_ID --body XXXXXXXXXX
+   gh secret set NOTARY_ISSUER_ID --body 01234567-89ab-cdef-0123-456789abcdef
+   rm sparkle-private-key.txt developer-id.p12
+   ```
+
+   The public key isn't secret. Instead of the variable, you can paste it into `project.yml` as `SPARKLE_PUBLIC_KEY`,
+   so your own builds check for updates too.
+
+For each release, tag the commit and push the tag:
+
+```sh
+git switch main && git pull
+git tag v0.2.0
+git push origin v0.2.0
+```
+
+The version comes from the tag: `v0.2.0` is Wren 0.2.0, and `v0.3.0-beta.1` is a pre-release that apps aren't
+offered. Follow it in Actions → Release. When it's done, the release has `Wren-0.2.0.zip` (signed, notarized and
+stapled, so it opens without warnings) and `appcast.xml`. People install the first version from the zip (unzip it and
+drag Wren to Applications); after that, Wren offers each new release itself. Debug builds don't check for updates.
 
 ## Tests
 
