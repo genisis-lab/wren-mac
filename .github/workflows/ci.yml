@@ -1,6 +1,8 @@
 name: CI
 on:
   push:
+    # Branches only: a version tag is the release workflow's.
+    branches: ['**']
   pull_request:
 defaults:
   run:
@@ -31,6 +33,7 @@ jobs:
             grep -hE '^([a-z]+: )?(error|warning): ' engine.log app.log | sort -u | sed -E 's#^([a-z]+: )?(error|warning): (.*)$#::\2::\1\3#'; } || true
           test -d build/Wren.app/Contents/PlugIns/WrenWidget.appex
           test -d build/Wren.app/Contents/PlugIns/WrenShare.appex
+          test -d build/Wren.app/Contents/Frameworks/Sparkle.framework
           exit $status
       # So the project can be opened in Xcode without XcodeGen. A push from here doesn't start another run.
       - name: Commit the project when project.yml changed it
