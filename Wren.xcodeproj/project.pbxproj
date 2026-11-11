@@ -1,0 +1,652 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 77;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		0FC747BCD60B23166767DB8B /* MailStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6468329ED84FEB4CC050267D /* MailStore.swift */; };
+		26D90A5437FF7C218C538864 /* UnreadWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = 643E9EB91325B915914713EF /* UnreadWidget.swift */; };
+		2E29A93DF68899707793FE76 /* Reader.swift in Sources */ = {isa = PBXBuildFile; fileRef = A51E1B2227FE679BBE83CF98 /* Reader.swift */; };
+		2EB989950F7B4A31FB495F39 /* ComposeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5958E6A8FF9CC3287A6B0C5 /* ComposeView.swift */; };
+		39C746F7CF141AF231E79482 /* WrenWidget.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = F1BCD07307879B08E2697B2C /* WrenWidget.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		4C310DC5C7C74FC0EEAE56B6 /* Demo.swift in Sources */ = {isa = PBXBuildFile; fileRef = AC706752F0F219CB8D9CCB84 /* Demo.swift */; };
+		52C16A03F29CA6F46A2B9A2C /* UnreadMail.swift in Sources */ = {isa = PBXBuildFile; fileRef = A3D34C60B8A69FE2104BE560 /* UnreadMail.swift */; };
+		5824E970115C3A1F1401C81B /* WrenShare.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 9700900A158E1EDBE3A8CE48 /* WrenShare.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		5BC7399F38D543DECD1DD658 /* UnreadMail.swift in Sources */ = {isa = PBXBuildFile; fileRef = A3D34C60B8A69FE2104BE560 /* UnreadMail.swift */; };
+		5C19CB42F6C26B263238D319 /* MessageWebView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C8C26B8B47D74D725883757C /* MessageWebView.swift */; };
+		68FF34E21E69B542F75868FE /* WrenApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 491A1C435E9204F6A121EEA8 /* WrenApp.swift */; };
+		75887D874B944C3A8C77DDF8 /* SignInView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D8640C94B63DEACBFF9889BF /* SignInView.swift */; };
+		7EF6B08CC4630358737A013D /* Keychain.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0C821E8ADA0F57FFE65CCE8 /* Keychain.swift */; };
+		8CD26BB822215DA91E21BAAF /* WrenKit in Frameworks */ = {isa = PBXBuildFile; productRef = 6E881E8313000AC062F7A2D9 /* WrenKit */; };
+		8CF3B03504E2BD1B9D15FFD1 /* ConversationList.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1ABA3B4BA24FB561FE333168 /* ConversationList.swift */; };
+		AE730F455432D94B5411436E /* Spotlight.swift in Sources */ = {isa = PBXBuildFile; fileRef = BA3BFA6A524076149F0CF248 /* Spotlight.swift */; };
+		B734BC6E9D04543DD43E346D /* Intents.swift in Sources */ = {isa = PBXBuildFile; fileRef = F7587AC264198D098A01C1EC /* Intents.swift */; };
+		CB08B768EE2D7CE08A546F80 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5AE9374267B2F608CB3509EF /* SettingsView.swift */; };
+		D85A2D6A43BB7540A8172440 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 86D356DA16B86D69B1A8DFAA /* Assets.xcassets */; };
+		E121F8180D488340327ED26D /* ShareViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 57DBB19D3068CD08472A2F28 /* ShareViewController.swift */; };
+		FC67D3956DA447116829380B /* MainView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 47B985B0FA60A4F3B388EEEA /* MainView.swift */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		C61BACE735C38FAB2E146DB2 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 470F110330FB05B54C66224A /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 653B0294A9E1BDC8FDFF18B1;
+			remoteInfo = WrenWidget;
+		};
+		F7CF5A0C6546BC0A305A41F6 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 470F110330FB05B54C66224A /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = E9F5AC3E1D236C14E9A09F58;
+			remoteInfo = WrenShare;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXCopyFilesBuildPhase section */
+		EF4DF297A35869787026A1FA /* Embed Foundation Extensions */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 13;
+			files = (
+				39C746F7CF141AF231E79482 /* WrenWidget.appex in Embed Foundation Extensions */,
+				5824E970115C3A1F1401C81B /* WrenShare.appex in Embed Foundation Extensions */,
+			);
+			name = "Embed Foundation Extensions";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
+
+/* Begin PBXFileReference section */
+		0D927D9AB04679E55EA5EB57 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
+		1ABA3B4BA24FB561FE333168 /* ConversationList.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConversationList.swift; sourceTree = "<group>"; };
+		36BEEEAC09E8FD5C0A0A56C1 /* WrenWidget.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = WrenWidget.entitlements; sourceTree = "<group>"; };
+		47B985B0FA60A4F3B388EEEA /* MainView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MainView.swift; sourceTree = "<group>"; };
+		491A1C435E9204F6A121EEA8 /* WrenApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WrenApp.swift; sourceTree = "<group>"; };
+		57DBB19D3068CD08472A2F28 /* ShareViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShareViewController.swift; sourceTree = "<group>"; };
+		5AE9374267B2F608CB3509EF /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
+		643E9EB91325B915914713EF /* UnreadWidget.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UnreadWidget.swift; sourceTree = "<group>"; };
+		6468329ED84FEB4CC050267D /* MailStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MailStore.swift; sourceTree = "<group>"; };
+		6F4623EAE5608CCA487BB943 /* wren-mac */ = {isa = PBXFileReference; lastKnownFileType = folder; name = "wren-mac"; path = .; sourceTree = SOURCE_ROOT; };
+		771DF2C89DAF5F2DD43F1864 /* Wren.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Wren.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		86D356DA16B86D69B1A8DFAA /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		9700900A158E1EDBE3A8CE48 /* WrenShare.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = WrenShare.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+		A0C821E8ADA0F57FFE65CCE8 /* Keychain.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Keychain.swift; sourceTree = "<group>"; };
+		A3D34C60B8A69FE2104BE560 /* UnreadMail.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UnreadMail.swift; sourceTree = "<group>"; };
+		A51E1B2227FE679BBE83CF98 /* Reader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Reader.swift; sourceTree = "<group>"; };
+		AC706752F0F219CB8D9CCB84 /* Demo.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Demo.swift; sourceTree = "<group>"; };
+		BA3BFA6A524076149F0CF248 /* Spotlight.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Spotlight.swift; sourceTree = "<group>"; };
+		C8C26B8B47D74D725883757C /* MessageWebView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MessageWebView.swift; sourceTree = "<group>"; };
+		D5958E6A8FF9CC3287A6B0C5 /* ComposeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ComposeView.swift; sourceTree = "<group>"; };
+		D8640C94B63DEACBFF9889BF /* SignInView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SignInView.swift; sourceTree = "<group>"; };
+		DD71242F1357798709AEFEB7 /* WrenShare.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = WrenShare.entitlements; sourceTree = "<group>"; };
+		E5E1D93888E59C33F73525E5 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
+		F1BCD07307879B08E2697B2C /* WrenWidget.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = WrenWidget.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+		F7587AC264198D098A01C1EC /* Intents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Intents.swift; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		3181BCC78E99E65879F4D9A2 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				8CD26BB822215DA91E21BAAF /* WrenKit in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		29C9D51C1FDAF94B88E71E92 /* Wren */ = {
+			isa = PBXGroup;
+			children = (
+				86D356DA16B86D69B1A8DFAA /* Assets.xcassets */,
+				D5958E6A8FF9CC3287A6B0C5 /* ComposeView.swift */,
+				1ABA3B4BA24FB561FE333168 /* ConversationList.swift */,
+				AC706752F0F219CB8D9CCB84 /* Demo.swift */,
+				F7587AC264198D098A01C1EC /* Intents.swift */,
+				A0C821E8ADA0F57FFE65CCE8 /* Keychain.swift */,
+				6468329ED84FEB4CC050267D /* MailStore.swift */,
+				47B985B0FA60A4F3B388EEEA /* MainView.swift */,
+				C8C26B8B47D74D725883757C /* MessageWebView.swift */,
+				A51E1B2227FE679BBE83CF98 /* Reader.swift */,
+				5AE9374267B2F608CB3509EF /* SettingsView.swift */,
+				D8640C94B63DEACBFF9889BF /* SignInView.swift */,
+				BA3BFA6A524076149F0CF248 /* Spotlight.swift */,
+				491A1C435E9204F6A121EEA8 /* WrenApp.swift */,
+			);
+			path = Wren;
+			sourceTree = "<group>";
+		};
+		2EB0D44F1F0B5AF805EE167A /* Sources */ = {
+			isa = PBXGroup;
+			children = (
+				854300127F258DF8C277153F /* Shared */,
+				29C9D51C1FDAF94B88E71E92 /* Wren */,
+				6267B92CACB5270216D1F741 /* WrenShare */,
+				697A1F62588181E09D17A2A2 /* WrenWidget */,
+			);
+			path = Sources;
+			sourceTree = "<group>";
+		};
+		4799528BB81F6A90895BC5E4 /* Packages */ = {
+			isa = PBXGroup;
+			children = (
+				6F4623EAE5608CCA487BB943 /* wren-mac */,
+			);
+			name = Packages;
+			sourceTree = "<group>";
+		};
+		6267B92CACB5270216D1F741 /* WrenShare */ = {
+			isa = PBXGroup;
+			children = (
+				0D927D9AB04679E55EA5EB57 /* Info.plist */,
+				57DBB19D3068CD08472A2F28 /* ShareViewController.swift */,
+				DD71242F1357798709AEFEB7 /* WrenShare.entitlements */,
+			);
+			path = WrenShare;
+			sourceTree = "<group>";
+		};
+		6650F3086C8037D02858D51B = {
+			isa = PBXGroup;
+			children = (
+				4799528BB81F6A90895BC5E4 /* Packages */,
+				2EB0D44F1F0B5AF805EE167A /* Sources */,
+				6E6B530D709AD1D42E0FB791 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		697A1F62588181E09D17A2A2 /* WrenWidget */ = {
+			isa = PBXGroup;
+			children = (
+				E5E1D93888E59C33F73525E5 /* Info.plist */,
+				643E9EB91325B915914713EF /* UnreadWidget.swift */,
+				36BEEEAC09E8FD5C0A0A56C1 /* WrenWidget.entitlements */,
+			);
+			path = WrenWidget;
+			sourceTree = "<group>";
+		};
+		6E6B530D709AD1D42E0FB791 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				771DF2C89DAF5F2DD43F1864 /* Wren.app */,
+				9700900A158E1EDBE3A8CE48 /* WrenShare.appex */,
+				F1BCD07307879B08E2697B2C /* WrenWidget.appex */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		854300127F258DF8C277153F /* Shared */ = {
+			isa = PBXGroup;
+			children = (
+				A3D34C60B8A69FE2104BE560 /* UnreadMail.swift */,
+			);
+			path = Shared;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		653B0294A9E1BDC8FDFF18B1 /* WrenWidget */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 1A3257DCB540FFB60804448A /* Build configuration list for PBXNativeTarget "WrenWidget" */;
+			buildPhases = (
+				39E6974A5BD12DFE0273558C /* Sources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = WrenWidget;
+			packageProductDependencies = (
+			);
+			productName = WrenWidget;
+			productReference = F1BCD07307879B08E2697B2C /* WrenWidget.appex */;
+			productType = "com.apple.product-type.app-extension";
+		};
+		E9F5AC3E1D236C14E9A09F58 /* WrenShare */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = BEC0CD14EDC7645C252C0998 /* Build configuration list for PBXNativeTarget "WrenShare" */;
+			buildPhases = (
+				A6BE10C03FC8EB14B3C18D13 /* Sources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = WrenShare;
+			packageProductDependencies = (
+			);
+			productName = WrenShare;
+			productReference = 9700900A158E1EDBE3A8CE48 /* WrenShare.appex */;
+			productType = "com.apple.product-type.app-extension";
+		};
+		F7E372FDBBEC3D562BD8C06D /* Wren */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = BD9C8616BC58FB6D032F5FBE /* Build configuration list for PBXNativeTarget "Wren" */;
+			buildPhases = (
+				D8A012A995E4CA8B76B6DA13 /* Sources */,
+				D8A8B7C77EAFEC29CC99A908 /* Resources */,
+				3181BCC78E99E65879F4D9A2 /* Frameworks */,
+				EF4DF297A35869787026A1FA /* Embed Foundation Extensions */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				511D41C164C07BAB614155CF /* PBXTargetDependency */,
+				3BC4CBFBEECC2F39BB44C8AD /* PBXTargetDependency */,
+			);
+			name = Wren;
+			packageProductDependencies = (
+				6E881E8313000AC062F7A2D9 /* WrenKit */,
+			);
+			productName = Wren;
+			productReference = 771DF2C89DAF5F2DD43F1864 /* Wren.app */;
+			productType = "com.apple.product-type.application";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		470F110330FB05B54C66224A /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = YES;
+				LastUpgradeCheck = 1430;
+				TargetAttributes = {
+					653B0294A9E1BDC8FDFF18B1 = {
+						DevelopmentTeam = "";
+						ProvisioningStyle = Manual;
+					};
+					E9F5AC3E1D236C14E9A09F58 = {
+						DevelopmentTeam = "";
+						ProvisioningStyle = Manual;
+					};
+					F7E372FDBBEC3D562BD8C06D = {
+						DevelopmentTeam = "";
+						ProvisioningStyle = Manual;
+					};
+				};
+			};
+			buildConfigurationList = 797F8532C4299549522E50B0 /* Build configuration list for PBXProject "Wren" */;
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				Base,
+				en,
+			);
+			mainGroup = 6650F3086C8037D02858D51B;
+			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				C242ACEB4BC744F5677E3821 /* XCLocalSwiftPackageReference "." */,
+			);
+			preferredProjectObjectVersion = 77;
+			productRefGroup = 6E6B530D709AD1D42E0FB791 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				F7E372FDBBEC3D562BD8C06D /* Wren */,
+				653B0294A9E1BDC8FDFF18B1 /* WrenWidget */,
+				E9F5AC3E1D236C14E9A09F58 /* WrenShare */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		D8A8B7C77EAFEC29CC99A908 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				D85A2D6A43BB7540A8172440 /* Assets.xcassets in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		39E6974A5BD12DFE0273558C /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				5BC7399F38D543DECD1DD658 /* UnreadMail.swift in Sources */,
+				26D90A5437FF7C218C538864 /* UnreadWidget.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		A6BE10C03FC8EB14B3C18D13 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				E121F8180D488340327ED26D /* ShareViewController.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		D8A012A995E4CA8B76B6DA13 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				2EB989950F7B4A31FB495F39 /* ComposeView.swift in Sources */,
+				8CF3B03504E2BD1B9D15FFD1 /* ConversationList.swift in Sources */,
+				4C310DC5C7C74FC0EEAE56B6 /* Demo.swift in Sources */,
+				B734BC6E9D04543DD43E346D /* Intents.swift in Sources */,
+				7EF6B08CC4630358737A013D /* Keychain.swift in Sources */,
+				0FC747BCD60B23166767DB8B /* MailStore.swift in Sources */,
+				FC67D3956DA447116829380B /* MainView.swift in Sources */,
+				5C19CB42F6C26B263238D319 /* MessageWebView.swift in Sources */,
+				2E29A93DF68899707793FE76 /* Reader.swift in Sources */,
+				CB08B768EE2D7CE08A546F80 /* SettingsView.swift in Sources */,
+				75887D874B944C3A8C77DDF8 /* SignInView.swift in Sources */,
+				AE730F455432D94B5411436E /* Spotlight.swift in Sources */,
+				52C16A03F29CA6F46A2B9A2C /* UnreadMail.swift in Sources */,
+				68FF34E21E69B542F75868FE /* WrenApp.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		3BC4CBFBEECC2F39BB44C8AD /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = E9F5AC3E1D236C14E9A09F58 /* WrenShare */;
+			targetProxy = F7CF5A0C6546BC0A305A41F6 /* PBXContainerItemProxy */;
+		};
+		511D41C164C07BAB614155CF /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 653B0294A9E1BDC8FDFF18B1 /* WrenWidget */;
+			targetProxy = C61BACE735C38FAB2E146DB2 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
+/* Begin XCBuildConfiguration section */
+		099F02B96F423FD98211771E /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = Sources/WrenWidget/WrenWidget.entitlements;
+				COMBINE_HIDPI_IMAGES = YES;
+				INFOPLIST_FILE = Sources/WrenWidget/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+					"@executable_path/../../../../Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = "io.github.genisis-lab.wren.widget";
+				SDKROOT = macosx;
+			};
+			name = Debug;
+		};
+		3DC2A4FC005E676F18D4F6D9 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = Sources/WrenShare/WrenShare.entitlements;
+				COMBINE_HIDPI_IMAGES = YES;
+				INFOPLIST_FILE = Sources/WrenShare/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+					"@executable_path/../../../../Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = "io.github.genisis-lab.wren.share";
+				SDKROOT = macosx;
+			};
+			name = Release;
+		};
+		4C0CCCE282A0347EAB18D35B /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = Wren.entitlements;
+				COMBINE_HIDPI_IMAGES = YES;
+				INFOPLIST_FILE = Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = "io.github.genisis-lab.wren";
+				PRODUCT_NAME = Wren;
+				SDKROOT = macosx;
+			};
+			name = Debug;
+		};
+		5E6977B4646C0CE9B91E3660 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				CODE_SIGN_IDENTITY = "-";
+				CODE_SIGN_STYLE = Manual;
+				COPY_PHASE_STRIP = NO;
+				CURRENT_PROJECT_VERSION = 1;
+				DEAD_CODE_STRIPPING = YES;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				DEVELOPMENT_TEAM = "";
+				ENABLE_DEBUG_DYLIB = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"$(inherited)",
+					"DEBUG=1",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				MARKETING_VERSION = 0.1.0;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = macosx;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_VERSION = 5.0;
+			};
+			name = Debug;
+		};
+		D7A26FAA8D366149060DD15F /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = Sources/WrenShare/WrenShare.entitlements;
+				COMBINE_HIDPI_IMAGES = YES;
+				INFOPLIST_FILE = Sources/WrenShare/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+					"@executable_path/../../../../Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = "io.github.genisis-lab.wren.share";
+				SDKROOT = macosx;
+			};
+			name = Debug;
+		};
+		F199FDC50DF50267D8951177 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				CODE_SIGN_IDENTITY = "-";
+				CODE_SIGN_STYLE = Manual;
+				COPY_PHASE_STRIP = NO;
+				CURRENT_PROJECT_VERSION = 1;
+				DEAD_CODE_STRIPPING = YES;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				DEVELOPMENT_TEAM = "";
+				ENABLE_DEBUG_DYLIB = NO;
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				MARKETING_VERSION = 0.1.0;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = macosx;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				SWIFT_VERSION = 5.0;
+			};
+			name = Release;
+		};
+		F73BBE2D9656C1D442E4E2BF /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = Sources/WrenWidget/WrenWidget.entitlements;
+				COMBINE_HIDPI_IMAGES = YES;
+				INFOPLIST_FILE = Sources/WrenWidget/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+					"@executable_path/../../../../Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = "io.github.genisis-lab.wren.widget";
+				SDKROOT = macosx;
+			};
+			name = Release;
+		};
+		FF30693A65EF7FEB108BD9F4 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = Wren.entitlements;
+				COMBINE_HIDPI_IMAGES = YES;
+				INFOPLIST_FILE = Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = "io.github.genisis-lab.wren";
+				PRODUCT_NAME = Wren;
+				SDKROOT = macosx;
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		1A3257DCB540FFB60804448A /* Build configuration list for PBXNativeTarget "WrenWidget" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				099F02B96F423FD98211771E /* Debug */,
+				F73BBE2D9656C1D442E4E2BF /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		797F8532C4299549522E50B0 /* Build configuration list for PBXProject "Wren" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				5E6977B4646C0CE9B91E3660 /* Debug */,
+				F199FDC50DF50267D8951177 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		BD9C8616BC58FB6D032F5FBE /* Build configuration list for PBXNativeTarget "Wren" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				4C0CCCE282A0347EAB18D35B /* Debug */,
+				FF30693A65EF7FEB108BD9F4 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		BEC0CD14EDC7645C252C0998 /* Build configuration list for PBXNativeTarget "WrenShare" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				D7A26FAA8D366149060DD15F /* Debug */,
+				3DC2A4FC005E676F18D4F6D9 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+/* End XCConfigurationList section */
+
+/* Begin XCLocalSwiftPackageReference section */
+		C242ACEB4BC744F5677E3821 /* XCLocalSwiftPackageReference "." */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = .;
+		};
+/* End XCLocalSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		6E881E8313000AC062F7A2D9 /* WrenKit */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = WrenKit;
+		};
+/* End XCSwiftPackageProductDependency section */
+	};
+	rootObject = 470F110330FB05B54C66224A /* Project object */;
+}
