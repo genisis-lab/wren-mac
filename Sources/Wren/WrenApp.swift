@@ -74,6 +74,9 @@ struct RootView: View {
             store.openWindow = openWindow
             store.restore()
         }
+        // mailto: links are the app delegate's; without this SwiftUI also rebuilt this window for each one,
+        // losing its size and selection.
+        .handlesExternalEvents(preferring: ["*"], allowing: ["*"])
         #if DEBUG
         .modifier(Demo())
         #endif
