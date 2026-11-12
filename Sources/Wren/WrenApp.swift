@@ -123,6 +123,11 @@ struct MailCommands: Commands {
                 if let ref = store.selectedMailbox { Task { await store.markAllRead(in: ref) } }
             }
             .disabled(!signedIn || (store.mailbox(store.selectedMailbox)?.unreadEmails ?? 0) == 0)
+            Button("New Label…") {
+                if let ref = store.selectedMailbox, ref != .allInboxes { store.labelEditor = LabelEdit(login: ref.login, account: ref.account) }
+                else if let ref = store.inboxes.first { store.labelEditor = LabelEdit(login: ref.login, account: ref.account) }
+            }
+            .disabled(!signedIn)
             Divider()
             Button("Scheduled Messages…") { store.showingScheduled = true }
                 .disabled(!signedIn)

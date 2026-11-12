@@ -382,6 +382,38 @@ final class WrenKitTests: XCTestCase {
         ])
     }
 
+    func testLabelsAreMadeRenamedAndDeleted() async throws {
+        let client = JMAPClient(server: URL(string: "https://mail.test")!, username: "ada@wren.test", password: "wren_app", http: Mock.session)
+        nonisolated(unsafe) var seen: [JSON] = []
+        Mock.handler = { request in
+            if request.url?.path == "/jmap/session" {
+                return [
+                    "apiUrl": "https://mail.test/jmap/api", "downloadUrl": "", "uploadUrl": "", "username": "ada@wren.test",
+                    "capabilities": [Capability.core: [:], Capability.mail: [:]],
+                    "accounts": ["u1": ["name": "ada@wren.test", "isPersonal": true, "accountCapabilities": [Capability.mail: [:]]]],
+                ]
+            }
+            let body = try JSONDecoder().decode(JSON.self, from: Mock.body(of: request))
+            let args = body["methodCalls"]?.array?.first?.array?[1] ?? nil
+            seen.append(args)
+            if args["create"] != nil { return ["methodResponses": [["Mailbox/set", ["created": ["label": ["id": "L7"]]], "0"]]] }
+            if args["update"] != nil { return ["methodResponses": [["Mailbox/set", ["notUpdated": ["L7": ["type": "alreadyExists", "description": "A mailbox with that name exists"]]], "0"]]] }
+            return ["methodResponses": [["Mailbox/set", ["destroyed": ["L7"]], "0"]]]
+        }
+        let id = try await client.createLabel("Travel", account: "u1")
+        XCTAssertEqual(id, "L7")
+        do {
+            try await client.renameLabel("L7", to: "Work", account: "u1")
+            XCTFail("A taken name is refused")
+        } catch {
+            XCTAssertEqual(error.localizedDescription, "A mailbox with that name exists")
+        }
+        try await client.deleteLabel("L7", account: "u1")
+        XCTAssertEqual(seen.map { $0["create"]?["label"]?["name"] }, ["Travel", nil, nil])
+        XCTAssertEqual(seen.last?["onDestroyRemoveEmails"], true)
+        XCTAssertEqual(seen.last?["destroy"], ["L7"])
+    }
+
     func testHeldSendsCanBeListedAndStopped() async throws {
         let client = JMAPClient(server: URL(string: "https://mail.test")!, username: "ada@wren.test", password: "wren_app", http: Mock.session)
         Mock.handler = { request in

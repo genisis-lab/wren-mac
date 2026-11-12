@@ -66,6 +66,18 @@ final class Login: Identifiable {
     }
 }
 
+/// A label being named in the label sheet.
+struct LabelEdit: Identifiable {
+    var login: String
+    var account: String
+    /// The label being renamed; nil for a new one.
+    var label: String?
+    var name = ""
+    /// Conversations to give the new label once it's made.
+    var labelling: Set<String> = []
+    var id: String { "\(login) \(account) \(label ?? "new")" }
+}
+
 /// A message held for a few seconds after Send, so it can still be stopped.
 struct PendingSend: Equatable {
     var submission: String
@@ -119,6 +131,10 @@ final class MailStore {
     var confirmingDelete: Set<String>?
     /// The Trash or Junk mailbox waiting for "Empty" to be confirmed.
     var confirmingEmpty: MailboxRef?
+    /// The label being named: a new one in an account, or one being renamed.
+    var labelEditor: LabelEdit?
+    /// A label waiting for "Delete" to be confirmed.
+    var confirmingDeleteLabel: MailboxRef?
     /// A message just sent and still held for Undo Send.
     private(set) var pendingSend: PendingSend?
     /// The Scheduled Messages sheet is open.
@@ -797,6 +813,74 @@ final class MailStore {
             alert = error.localizedDescription
         }
         await refresh(groups.keys)
+    }
+
+    // MARK: Labels
+
+    /// Make a label, or rename one (from `labelEditor`). Throws so the sheet can say what's wrong.
+    func saveLabel(_ edit: LabelEdit, name: String) async throws {
+        let name = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let login = login(edit.login) else { throw NotConnected() }
+        if let label = edit.label {
+            try await login.client.renameLabel(label, to: name, account: edit.account)
+        } else {
+            let id = try await login.client.createLabel(name, account: edit.account)
+            // Made from a conversation's Labels menu: those conversations get it straight away.
+            if !edit.labelling.isEmpty {
+                await refresh(login)
+                if let label = labels(in: MailboxRef(login: login.id, account: edit.account, mailbox: "")).first(where: { $0.id == id }) {
+                    await setLabel(label, true, for: edit.labelling)
+                }
+                return
+            }
+        }
+        await refresh(login)
+    }
+
+    /// Delete a label after asking (its mail stays in its folders).
+    func deleteLabel(_ ref: MailboxRef) async {
+        guard let login = login(ref.login) else { return }
+        do {
+            try await login.client.deleteLabel(ref.mailbox, account: ref.account)
+            if selectedMailbox == ref { selectedMailbox = nil }
+        } catch {
+            alert = error.localizedDescription
+        }
+        await refresh(login)
+    }
+
+    // MARK: Dragging to the sidebar
+
+    /// What a conversation dragged out of the list carries: a marker and the thread ids (the list knows where they are).
+    static let dragPrefix = "wren-conversations:"
+
+    func dragPayload(for id: String) -> String {
+        let ids = selectedThreads.contains(id) ? selectedThreads : [id]
+        return Self.dragPrefix + ids.sorted().joined(separator: ",")
+    }
+
+    static func dropped(_ items: [String]) -> Set<String> {
+        Set(items.filter { $0.hasPrefix(dragPrefix) }.flatMap { $0.dropFirst(dragPrefix.count).split(separator: ",").map(String.init) })
+    }
+
+    /// Whether conversations from the list can be dropped on a sidebar mailbox: one in the same account, other than
+    /// the one being shown (moving between accounts would mean copying mail, which Wren doesn't do).
+    func canDrop(on ref: MailboxRef) -> Bool {
+        guard ref != .allInboxes, ref != selectedMailbox, let target = mailbox(ref) else { return false }
+        if ["drafts", "sent", "snoozed"].contains(target.role ?? "") { return false }
+        let from = selectedMailbox == .allInboxes ? Set(rowPlaces.values.map { "\($0.login) \($0.account)" }) : Set([selectedMailbox].compactMap { $0.map { "\($0.login) \($0.account)" } })
+        return from.contains("\(ref.login) \(ref.account)")
+    }
+
+    /// Conversations dropped on a sidebar mailbox: moved to a folder, or given a label.
+    func drop(_ ids: Set<String>, on ref: MailboxRef) async {
+        let ids = ids.filter { place(of: $0).map { $0.login == ref.login && $0.account == ref.account } ?? false }
+        guard !ids.isEmpty, let target = mailbox(ref) else { return }
+        if let role = target.role {
+            await move(ids, toFolder: role)
+        } else {
+            await setLabel(target, true, for: ids)
+        }
     }
 
     /// Mark everything in a mailbox as read.

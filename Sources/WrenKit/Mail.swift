@@ -14,6 +14,25 @@ extension JMAPClient {
         return try (r[0]["list"] ?? []).decode([Mailbox].self).sorted { ($0.sortOrder, $0.name) < ($1.sortOrder, $1.name) }
     }
 
+    /// A new label (Wren's mailboxes without a role); returns its id.
+    public func createLabel(_ name: String, account: String) async throws -> String {
+        let r = try await call([("Mailbox/set", ["accountId": .string(account), "create": ["label": ["name": .string(name)]]])])
+        try checkSet(r[0])
+        guard let id = r[0]["created"]?["label"]?["id"]?.string else { throw JMAPError.badResponse }
+        return id
+    }
+
+    public func renameLabel(_ id: String, to name: String, account: String) async throws {
+        let r = try await call([("Mailbox/set", ["accountId": .string(account), "update": [id: ["name": .string(name)]]])])
+        try checkSet(r[0])
+    }
+
+    /// Delete a label. Its mail stays where it is (in its folder); only the label comes off.
+    public func deleteLabel(_ id: String, account: String) async throws {
+        let r = try await call([("Mailbox/set", ["accountId": .string(account), "destroy": [.string(id)], "onDestroyRemoveEmails": true])])
+        try checkSet(r[0])
+    }
+
     public func identities(account: String) async throws -> [Identity] {
         let r = try await call([("Identity/get", ["accountId": .string(account)])])
         return try (r[0]["list"] ?? []).decode([Identity].self)

@@ -12,6 +12,8 @@ struct ConversationList: View {
             ForEach(store.conversations) { conversation in
                 ConversationRow(conversation: conversation, showRecipients: showRecipients)
                     .tag(conversation.id)
+                    // Onto a sidebar mailbox or label (the whole selection, when this row is in it).
+                    .draggable(store.dragPayload(for: conversation.id))
                     .swipeActions(edge: .leading) {
                         let unread = conversation.email.isUnread
                         Button {
@@ -256,7 +258,7 @@ struct MessageActions: View {
                 }
             }
         }
-        if let ref = store.selectedMailbox, !store.labels(in: ref).isEmpty {
+        if let ref = store.selectedMailbox, ref != .allInboxes {
             Menu("Labels") {
                 ForEach(store.labels(in: ref)) { label in
                     Toggle(label.name, isOn: Binding(
@@ -264,6 +266,8 @@ struct MessageActions: View {
                         set: { on in Task { await store.setLabel(label, on, for: ids) } }
                     ))
                 }
+                if !store.labels(in: ref).isEmpty { Divider() }
+                Button("New Label…") { store.labelEditor = LabelEdit(login: ref.login, account: ref.account, labelling: ids) }
             }
         }
     }

@@ -19,6 +19,18 @@ struct MainView: View {
         }
         .searchable(text: $store.search, placement: .toolbar, prompt: "Search")
         .onAppear { store.undoManager = undoManager }
+        .sheet(item: $store.labelEditor) { LabelSheet(edit: $0) }
+        .confirmationDialog(
+            "Delete the label “\(store.mailbox(store.confirmingDeleteLabel)?.name ?? "")”?",
+            isPresented: Binding(get: { store.confirmingDeleteLabel != nil }, set: { if !$0 { store.confirmingDeleteLabel = nil } }),
+            titleVisibility: .visible,
+            presenting: store.confirmingDeleteLabel
+        ) { ref in
+            Button("Delete Label", role: .destructive) { Task { await store.deleteLabel(ref) } }
+            Button("Cancel", role: .cancel) {}
+        } message: { _ in
+            Text("Its mail stays where it is; only the label comes off.")
+        }
         .sheet(isPresented: $store.showingScheduled) { ScheduledView() }
         .alert("Something went wrong", isPresented: Binding(get: { store.alert != nil }, set: { if !$0 { store.alert = nil } })) {
             Button("OK", role: .cancel) {}
@@ -71,6 +83,7 @@ struct Sidebar: View {
                             let ref = MailboxRef(login: login.id, account: account.id, mailbox: box.id)
                             MailboxRow(mailbox: box).tag(ref)
                                 .contextMenu { MailboxActions(ref: ref) }
+                                .modifier(DropConversations(ref: ref))
                         }
                     }
                     let labels = boxes.filter { $0.role == nil }
@@ -80,6 +93,7 @@ struct Sidebar: View {
                                 let ref = MailboxRef(login: login.id, account: account.id, mailbox: box.id)
                                 MailboxRow(mailbox: box).tag(ref)
                                     .contextMenu { MailboxActions(ref: ref) }
+                                    .modifier(DropConversations(ref: ref))
                             }
                         }
                     }
@@ -162,6 +176,72 @@ struct UndoSendBar: View {
     }
 }
 
+/// Conversations dragged from the list onto a sidebar mailbox: moved there, or labelled.
+struct DropConversations: ViewModifier {
+    let ref: MailboxRef
+    @Environment(MailStore.self) private var store
+    @State private var targeted = false
+
+    func body(content: Content) -> some View {
+        content
+            .dropDestination(for: String.self) { items, _ in
+                let ids = MailStore.dropped(items)
+                guard !ids.isEmpty, store.canDrop(on: ref) else { return false }
+                Task { await store.drop(ids, on: ref) }
+                return true
+            } isTargeted: { targeted = $0 && store.canDrop(on: ref) }
+            .listRowBackground(targeted ? RoundedRectangle(cornerRadius: 5).fill(Color.accentColor.opacity(0.25)) : nil)
+    }
+}
+
+/// Naming a new label, or renaming one.
+struct LabelSheet: View {
+    let edit: LabelEdit
+    @Environment(MailStore.self) private var store
+    @Environment(\.dismiss) private var dismiss
+    @State private var name = ""
+    @State private var working = false
+    @State private var error: String?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text(edit.label == nil ? "New Label" : "Rename Label").font(.headline)
+            TextField("Name", text: $name)
+                .textFieldStyle(.roundedBorder)
+                .onSubmit(save)
+            if let error {
+                Text(error).font(.callout).foregroundStyle(.red)
+            }
+            HStack {
+                Spacer()
+                Button("Cancel", role: .cancel) { dismiss() }
+                    .keyboardShortcut(.cancelAction)
+                Button(edit.label == nil ? "Create" : "Rename", action: save)
+                    .keyboardShortcut(.defaultAction)
+                    .disabled(working || name.trimmingCharacters(in: .whitespaces).isEmpty || name == edit.name)
+            }
+        }
+        .padding(20)
+        .frame(width: 320)
+        .onAppear { name = edit.name }
+    }
+
+    private func save() {
+        guard !working, !name.trimmingCharacters(in: .whitespaces).isEmpty else { return }
+        working = true
+        error = nil
+        Task {
+            do {
+                try await store.saveLabel(edit, name: name)
+                dismiss()
+            } catch {
+                self.error = error.localizedDescription
+            }
+            working = false
+        }
+    }
+}
+
 /// What a mailbox's right-click menu offers.
 struct MailboxActions: View {
     let ref: MailboxRef
@@ -175,6 +255,14 @@ struct MailboxActions: View {
             Divider()
             Button(role == "trash" ? "Empty Trash…" : "Empty Junk…") { store.confirmingEmpty = ref }
                 .disabled((box?.totalEmails ?? 0) == 0)
+        }
+        if ref != .allInboxes {
+            Divider()
+            Button("New Label…") { store.labelEditor = LabelEdit(login: ref.login, account: ref.account) }
+            if let box, box.role == nil {
+                Button("Rename Label…") { store.labelEditor = LabelEdit(login: ref.login, account: ref.account, label: box.id, name: box.name) }
+                Button("Delete Label…") { store.confirmingDeleteLabel = ref }
+            }
         }
     }
 }
