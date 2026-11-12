@@ -10,14 +10,18 @@ mail apps have to be turned on in Wren (Admin → Settings & policies → Securi
 - Opens with your mail showing, and shows what you've looked at when you're offline: the last list
   of each mailbox and the 150 conversations you opened most recently are kept on your Mac
 - Conversations, search as you type with the matching words marked, and a reader that folds older messages
+- Show only unread mail (⌘L, or the filter button above the list)
 - Archive, Trash, Junk, flag, read/unread, labels and snooze, from the toolbar, the Message
   menu, swipes and right-click; moves can be undone with ⌘Z
+- Right-click a mailbox to mark everything in it as read, or to empty the Trash or Junk
 - Compose in its own window: reply, reply all, forward (with attachments), attach files (or drop
   them on the window), send now or later; closing a window with changes saves it to Drafts
 - Formatting as you write: bold, italic, underline (⌘B, ⌘I, ⌘U), links (⌘K), bulleted and numbered
   lists and quotes. It's sent as HTML with a plain-text copy, and replies keep the quoted message's HTML
 - Calendar invitations show a card with what, when, where and who's asking, and Accept, Maybe and
   Decline (with a comment) send your answer to the organizer
+- Mailing-list mail has an Unsubscribe button: Wren asks the list or writes to it for you, as on the web
+  (with a Wren server that has it)
 - Send as a private link that stops working after 1, 7 or 30 days, as on the web
 - PGP, the same as Wren on the web (Settings → Encryption): restore your key from the backup you made
   in Wren, read encrypted mail (inline and PGP/MIME) and check signatures, and encrypt and sign what
@@ -29,7 +33,7 @@ mail apps have to be turned on in Wren (Admin → Settings & policies → Securi
   warning in the sidebar when your mailbox is nearly full
 - Live updates over Wren's push stream, and a notification for new mail in your Inbox that opens
   the conversation when you click it, with Reply (type it right in the notification), Archive and
-  Mark as Read buttons
+  Mark as Read buttons; a notification goes away once its mail is read or filed, here or anywhere else
 - Conversations you've looked at show up in Spotlight (sender, subject and preview) and open in Wren
 - Share → Wren from any app: files become a new message with them attached (as when you drop them
   on Wren's Dock icon), links and text a new message with them in it

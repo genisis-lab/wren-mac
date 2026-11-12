@@ -35,6 +35,17 @@ struct MainView: View {
         } message: { _ in
             Text("You can’t undo this.")
         }
+        .confirmationDialog(
+            "Delete everything in \(store.mailbox(store.confirmingEmpty)?.name ?? "this mailbox") forever?",
+            isPresented: Binding(get: { store.confirmingEmpty != nil }, set: { if !$0 { store.confirmingEmpty = nil } }),
+            titleVisibility: .visible,
+            presenting: store.confirmingEmpty
+        ) { ref in
+            Button("Delete Forever", role: .destructive) { Task { await store.empty(ref) } }
+            Button("Cancel", role: .cancel) {}
+        } message: { _ in
+            Text("You can’t undo this.")
+        }
     }
 }
 
@@ -47,6 +58,7 @@ struct Sidebar: View {
         List(selection: $store.selectedMailbox) {
             if several, let all = store.mailbox(.allInboxes) {
                 MailboxRow(mailbox: all).tag(MailboxRef.allInboxes)
+                    .contextMenu { MailboxActions(ref: .allInboxes) }
             }
             ForEach(store.logins) { login in
                 ForEach(login.accounts) { account in
@@ -55,14 +67,18 @@ struct Sidebar: View {
                     let title = account.isPersonal ? (several ? login.username : "Mailboxes") : account.name
                     Section(title) {
                         ForEach(boxes.filter { $0.role != nil }) { box in
-                            MailboxRow(mailbox: box).tag(MailboxRef(login: login.id, account: account.id, mailbox: box.id))
+                            let ref = MailboxRef(login: login.id, account: account.id, mailbox: box.id)
+                            MailboxRow(mailbox: box).tag(ref)
+                                .contextMenu { MailboxActions(ref: ref) }
                         }
                     }
                     let labels = boxes.filter { $0.role == nil }
                     if !labels.isEmpty {
                         Section(account.isPersonal && !several ? "Labels" : "\(title) Labels") {
                             ForEach(labels) { box in
-                                MailboxRow(mailbox: box).tag(MailboxRef(login: login.id, account: account.id, mailbox: box.id))
+                                let ref = MailboxRef(login: login.id, account: account.id, mailbox: box.id)
+                                MailboxRow(mailbox: box).tag(ref)
+                                    .contextMenu { MailboxActions(ref: ref) }
                             }
                         }
                     }
@@ -104,6 +120,23 @@ struct Sidebar: View {
                 notes.append(Note(text: who + "Storage is \(full) full. Delete large messages to keep getting mail.", icon: "externaldrive.badge.exclamationmark", help: storageText(quota)))
             }
             return notes
+        }
+    }
+}
+
+/// What a mailbox's right-click menu offers.
+struct MailboxActions: View {
+    let ref: MailboxRef
+    @Environment(MailStore.self) private var store
+
+    var body: some View {
+        let box = store.mailbox(ref)
+        Button("Mark All as Read") { Task { await store.markAllRead(in: ref) } }
+            .disabled((box?.unreadEmails ?? 0) == 0)
+        if ref != .allInboxes, let role = box?.role, role == "trash" || role == "junk" {
+            Divider()
+            Button(role == "trash" ? "Empty Trash…" : "Empty Junk…") { store.confirmingEmpty = ref }
+                .disabled((box?.totalEmails ?? 0) == 0)
         }
     }
 }

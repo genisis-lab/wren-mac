@@ -19,6 +19,11 @@ public enum JSON: Sendable, Hashable {
         return nil
     }
 
+    public var bool: Bool? {
+        if case .bool(let b) = self { return b }
+        return nil
+    }
+
     public var int: Int? {
         if case .number(let n) = self, let i = Int(exactly: n) { return i }
         return nil

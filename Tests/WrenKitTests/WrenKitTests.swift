@@ -85,6 +85,14 @@ final class WrenKitTests: XCTestCase {
         XCTAssertEqual(Draft.reply(to: sent, all: false, account: "u1", identities: [me]).to, "Ada <ADA@wren.test>, bob@example.com")
     }
 
+    func testReplyGoesToReplyToUnlessItIsEmpty() {
+        let me = Identity(id: "I1", name: "Ada", email: "ada@wren.test")
+        var email = Email(id: "M1", threadId: "T1", mailboxIds: [:], keywords: [:], from: [EmailAddress(email: "news@example.com")], replyTo: [EmailAddress(email: "help@example.com")])
+        XCTAssertEqual(Draft.reply(to: email, all: false, account: "u1", identities: [me]).to, "help@example.com")
+        email.replyTo = []
+        XCTAssertEqual(Draft.reply(to: email, all: false, account: "u1", identities: [me]).to, "news@example.com")
+    }
+
     func testDraftBecomesAnEmailSetCreate() throws {
         var d = Draft(accountId: "u1", identityId: "I1")
         d.to = "Grace <grace@example.com>"
@@ -418,6 +426,74 @@ final class WrenKitTests: XCTestCase {
         XCTAssertEqual(backup?.armored, "LOCKED")
         let me = Identity(id: "I1", name: "Ada", email: "ada@wren.test")
         try await client.submit(emailId: "M2", account: "u1", identity: me, recipients: [], privateLinkDays: 7, draftsMailbox: "drafts", sentMailbox: "sent")
+    }
+
+    func testUnreadFilterBulkChangesAndUnsubscribe() async throws {
+        let client = JMAPClient(server: URL(string: "https://mail.test")!, username: "ada@wren.test", password: "wren_app", http: Mock.session)
+        nonisolated(unsafe) var unread = (1...501).map { "M\($0)" }
+        nonisolated(unsafe) var sets: [JSON] = []
+        Mock.handler = { request in
+            if request.url?.path == "/jmap/session" {
+                return [
+                    "apiUrl": "https://mail.test/jmap/api", "downloadUrl": "", "uploadUrl": "", "username": "ada@wren.test",
+                    "capabilities": [Capability.core: [:], Capability.mail: [:], Capability.wren: [:]],
+                    "accounts": [
+                        "u1": ["name": "ada@wren.test", "isPersonal": true, "accountCapabilities": [Capability.mail: [:], Capability.wren: ["canSend": true, "unsubscribe": true]]],
+                        "u2": ["name": "team@wren.test", "isPersonal": false, "accountCapabilities": [Capability.mail: [:], Capability.wren: ["canSend": false, "unsubscribe": true]]],
+                        "u3": ["name": "old@wren.test", "isPersonal": false, "accountCapabilities": [Capability.mail: [:], Capability.wren: [:]]],
+                    ],
+                ]
+            }
+            let body = try JSONDecoder().decode(JSON.self, from: Mock.body(of: request))
+            let calls = body["methodCalls"]?.array ?? []
+            let args = calls.last?.array?[1] ?? nil
+            switch calls.first?.array?[0].string {
+            case "Email/query" where calls.count > 1:
+                XCTAssertEqual(calls[0].array?[1]["filter"], ["inMailbox": "inbox", "notKeyword": "$seen"])
+                return ["methodResponses": [["Email/query", ["ids": [], "total": 0], "0"], ["Email/get", ["list": []], "1"], ["Thread/get", ["list": []], "2"]]]
+            case "Email/query":
+                XCTAssertEqual(args["limit"], 500)
+                if args["filter"] == ["inMailbox": "trash"] { return ["methodResponses": [["Email/query", ["ids": sets.isEmpty ? ["M9"] : []], "0"]]] }
+                XCTAssertEqual(args["filter"], ["inMailbox": "inbox", "notKeyword": "$seen"])
+                return ["methodResponses": [["Email/query", ["ids": .array(unread.prefix(500).map(JSON.string))], "0"]]]
+            case "Email/set":
+                sets.append(args)
+                unread.removeFirst(min(500, unread.count, args["update"]?.object?.count ?? 0))
+                return ["methodResponses": [["Email/set", [:], "0"]]]
+            case "Thread/get":
+                // Only a server that says it can unsubscribe is asked for those properties.
+                XCTAssertEqual(args["properties"]?.array?.contains("canUnsubscribe"), args["accountId"] == "u1")
+                XCTAssertEqual(args["properties"]?.array?.contains("invite"), true)
+                return ["methodResponses": [
+                    ["Thread/get", ["list": [["id": "T1", "emailIds": ["M1"]]]], "0"],
+                    ["Email/get", ["list": [["id": "M1", "threadId": "T1", "mailboxIds": ["inbox": true], "keywords": [:], "canUnsubscribe": true, "unsubscribed": false]]], "1"],
+                ]]
+            default:
+                XCTAssertEqual(calls.first?.array?[0], "MailingList/unsubscribe")
+                XCTAssertEqual(args, ["accountId": "u1", "emailId": "M1"])
+                return ["methodResponses": [["MailingList/unsubscribe", ["accountId": "u1", "emailId": "M1", "method": "link", "url": "https://site.example/prefs", "sender": "x@site.example"], "0"]]]
+            }
+        }
+        let accounts = try await client.connect().mailAccounts
+        XCTAssertEqual(accounts.map(\.canSend), [true, nil, false])
+        XCTAssertEqual(accounts.map(\.canUnsubscribe), [true, nil, true])
+
+        _ = try await client.conversations(account: "u1", mailbox: "inbox", unreadOnly: true, limit: 50)
+        let marked = try await client.markAllRead(account: "u1", mailbox: "inbox")
+        XCTAssertEqual(marked, 501)
+        XCTAssertEqual(sets.map { $0["update"]?.object?.count }, [500, 1])
+        XCTAssertEqual(sets[1]["update"]?["M501"], ["keywords/$seen": true])
+        sets = []
+        let emptied = try await client.empty(account: "u1", mailbox: "trash")
+        XCTAssertEqual(emptied, 1)
+        XCTAssertEqual(sets, [["accountId": "u1", "destroy": ["M9"]]])
+
+        let email = try await client.conversation(account: "u1", threadId: "T1").first
+        XCTAssertEqual(email?.canUnsubscribe, true)
+        XCTAssertEqual(email?.unsubscribed, false)
+        _ = try await client.conversation(account: "u3", threadId: "T1")
+        let done = try await client.unsubscribe(from: "M1", account: "u1")
+        XCTAssertEqual(done, Unsubscribed(method: "link", url: URL(string: "https://site.example/prefs"), sender: "x@site.example"))
     }
 
     func testCacheKeepsListsAndTheNewestConversations() throws {

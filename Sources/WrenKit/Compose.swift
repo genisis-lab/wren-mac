@@ -124,7 +124,9 @@ public struct Draft: Codable, Hashable, Sendable, Identifiable {
         var d = Draft(accountId: account, identityId: identity?.id)
         let fromMe = email.from?.contains { mine.contains($0.email.lowercased()) } ?? false
         // Replying to your own message goes to the people you sent it to.
-        let primary = fromMe ? (email.to ?? []) : (email.replyTo ?? email.from ?? [])
+        // An empty Reply-To is no Reply-To.
+        let replyTo = email.replyTo.flatMap { $0.isEmpty ? nil : $0 }
+        let primary = fromMe ? (email.to ?? []) : (replyTo ?? email.from ?? [])
         d.to = primary.map(\.formatted).joined(separator: ", ")
         if all {
             var seen = mine.union(primary.map { $0.email.lowercased() })

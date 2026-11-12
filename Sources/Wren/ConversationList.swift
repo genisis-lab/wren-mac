@@ -56,18 +56,30 @@ struct ConversationList: View {
             let ids = store.selectedThreads
             Task { await store.trash(ids) }
         }
+        // A list that starts over is a new list (see MailStore.listEpoch).
+        .id(store.listEpoch)
         .overlay {
             if store.conversations.isEmpty && !store.isLoading {
-                if store.search.isEmpty {
-                    ContentUnavailableView("No Messages", systemImage: "tray")
-                } else {
+                if !store.search.isEmpty {
                     ContentUnavailableView.search(text: store.search)
+                } else if store.unreadOnly {
+                    ContentUnavailableView("No Unread Messages", systemImage: "tray")
+                } else {
+                    ContentUnavailableView("No Messages", systemImage: "tray")
                 }
             }
         }
         .navigationTitle(store.mailbox(store.selectedMailbox)?.name ?? "Wren")
         .navigationSubtitle(subtitle)
         .toolbar {
+            ToolbarItem {
+                Button {
+                    Task { await store.toggleUnreadOnly() }
+                } label: {
+                    Label("Unread Only", systemImage: store.unreadOnly ? "line.3.horizontal.decrease.circle.fill" : "line.3.horizontal.decrease.circle")
+                }
+                .help(store.unreadOnly ? "Show All Messages (⌘L)" : "Show Unread Only (⌘L)")
+            }
             ToolbarItem {
                 Button {
                     if let d = store.newDraft() { openWindow(id: "compose", value: d) }
@@ -88,6 +100,7 @@ struct ConversationList: View {
     private var subtitle: String {
         if !store.search.isEmpty { return store.total == 1 ? "1 result" : "\(store.total.formatted()) results" }
         let unread = store.mailbox(store.selectedMailbox)?.unreadEmails ?? 0
+        if store.unreadOnly { return store.total == 1 ? "1 unread conversation" : "\(store.total.formatted()) unread conversations" }
         let all = store.total == 1 ? "1 conversation" : "\(store.total.formatted()) conversations"
         return unread > 0 && store.currentRole != "drafts" ? "\(all), \(unread.formatted()) unread" : all
     }

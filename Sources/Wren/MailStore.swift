@@ -83,6 +83,11 @@ final class MailStore {
     var selectedMailbox: MailboxRef?
     var selectedThreads: Set<String> = []
     var search = ""
+    /// Only conversations with unread mail (until another mailbox is chosen).
+    private(set) var unreadOnly = false
+    /// Goes up when the list starts over with other rows. The list is made afresh then: changing a table row by row
+    /// while its rows are still being measured is what AppKit logs as a reentrant operation.
+    private(set) var listEpoch = 0
     private(set) var conversations: [Conversation] = []
     private(set) var total = 0
     private(set) var isLoading = false
@@ -101,6 +106,8 @@ final class MailStore {
     var alert: String?
     /// Conversations in the Trash waiting for "Delete Forever" to be confirmed.
     var confirmingDelete: Set<String>?
+    /// The Trash or Junk mailbox waiting for "Empty" to be confirmed.
+    var confirmingEmpty: MailboxRef?
 
     @ObservationIgnored var undoManager: UndoManager?
     /// For windows opened from outside a window: mailto: links and notifications. Set by the main window.
@@ -320,10 +327,19 @@ final class MailStore {
         total = 0
         limit = 50
         rowPlaces = [:]
+        unreadOnly = false
         if let ref = selectedMailbox, ref != .allInboxes, let cached = login(ref.login)?.cache.list(account: ref.account, mailbox: ref.mailbox) {
             conversations = cached.conversations
             total = cached.total
         }
+        listEpoch += 1
+        await loadList()
+    }
+
+    /// Show only unread mail, or everything again.
+    func toggleUnreadOnly() async {
+        unreadOnly.toggle()
+        limit = 50
         await loadList()
     }
 
@@ -331,6 +347,7 @@ final class MailStore {
         guard let ref = selectedMailbox else { return }
         listGeneration += 1
         let generation = listGeneration
+        let unreadOnly = self.unreadOnly
         isLoading = true
         defer { if generation == listGeneration { isLoading = false } }
         var rows: [(conversation: Conversation, place: MailboxRef)] = []
@@ -339,18 +356,18 @@ final class MailStore {
         for place in ref == .allInboxes ? inboxes : [ref] {
             guard let login = login(place.login) else { continue }
             do {
-                let page = try await login.client.conversations(account: place.account, mailbox: place.mailbox, search: search, limit: limit)
+                let page = try await login.client.conversations(account: place.account, mailbox: place.mailbox, search: search, unreadOnly: unreadOnly, limit: limit)
                 rows += page.list.map { ($0, place) }
                 total += page.total
                 loaded = true
-                if search.isEmpty {
+                if search.isEmpty, !unreadOnly {
                     login.cache.saveList(.init(conversations: page.list, total: page.total), account: place.account, mailbox: place.mailbox)
                     Spotlight.index(page.list, in: place)
                 }
             } catch {
                 login.problem = error.localizedDescription
                 // Offline: the list from last time.
-                if search.isEmpty, let cached = login.cache.list(account: place.account, mailbox: place.mailbox) {
+                if search.isEmpty, !unreadOnly, let cached = login.cache.list(account: place.account, mailbox: place.mailbox) {
                     rows += cached.conversations.map { ($0, place) }
                     total += cached.total
                     loaded = true
@@ -363,6 +380,17 @@ final class MailStore {
             rows.sort { ($0.conversation.email.receivedAt ?? .distantPast) > ($1.conversation.email.receivedAt ?? .distantPast) }
         }
         rows = Array(rows.prefix(limit))
+        if unreadOnly {
+            // What's selected stays in the list once reading it has marked it read, as in Mail.
+            let listed = Set(rows.map(\.conversation.id))
+            let kept = conversations.filter { selectedThreads.contains($0.id) && !listed.contains($0.id) }
+            for row in kept {
+                if let place = place(of: row.id) { rows.append((row, place)) }
+            }
+            if !kept.isEmpty { rows.sort { ($0.conversation.email.receivedAt ?? .distantPast) > ($1.conversation.email.receivedAt ?? .distantPast) } }
+        }
+        // Rows arriving in an empty list: nothing on screen to keep in place.
+        if conversations.isEmpty, !rows.isEmpty { listEpoch += 1 }
         conversations = rows.map(\.conversation)
         rowPlaces = Dictionary(rows.map { ($0.conversation.id, $0.place) }, uniquingKeysWith: { a, _ in a })
         self.total = total
@@ -390,6 +418,8 @@ final class MailStore {
             if let place = threadPlace, let cached = login(place.login)?.cache.thread(id) { thread = visible(cached, in: place) }
         }
         await loadThread(id)
+        // Another conversation was chosen while this one loaded; it does its own reading.
+        guard threadId == id else { return }
         let unread = thread.filter(\.isUnread)
         unreadWhenOpened.formUnion(unread.map(\.id))
         if !unread.isEmpty { await markRead(unread) }
@@ -597,6 +627,12 @@ final class MailStore {
         await refresh()
     }
 
+    /// Whether every selected conversation is flagged (so Flag reads Unflag).
+    var selectionIsFlagged: Bool {
+        let rows = conversations.filter { selectedThreads.contains($0.id) }
+        return !rows.isEmpty && rows.allSatisfy(\.email.isFlagged)
+    }
+
     /// Snoozing is for the Inbox and Archive, in accounts whose server supports it.
     var canSnooze: Bool {
         guard currentRole == "inbox" || currentRole == "archive", let ref = selectedMailbox else { return false }
@@ -634,6 +670,31 @@ final class MailStore {
         } catch {
             alert = error.localizedDescription
         }
+        await refresh()
+    }
+
+    /// Mark everything in a mailbox as read.
+    func markAllRead(in ref: MailboxRef) async {
+        for place in ref == .allInboxes ? inboxes : [ref] {
+            do {
+                try await login(place.login)?.client.markAllRead(account: place.account, mailbox: place.mailbox)
+            } catch {
+                alert = error.localizedDescription
+            }
+        }
+        await refresh()
+    }
+
+    /// Delete everything in the Trash or Junk for good (after asking: see confirmingEmpty).
+    func empty(_ ref: MailboxRef) async {
+        guard let login = login(ref.login), ["trash", "junk"].contains(mailbox(ref)?.role ?? "") else { return }
+        do {
+            try await login.client.empty(account: ref.account, mailbox: ref.mailbox)
+        } catch {
+            alert = error.localizedDescription
+        }
+        // What was moved there can't be put back any more.
+        undoManager?.removeAllActions()
         await refresh()
     }
 
@@ -756,11 +817,24 @@ final class MailStore {
 
     // MARK: Invitations
 
-    /// Whether the conversation being read is in an account that can send. Wren says so only when an answer is
-    /// refused, so it's learned then.
-    /// shortcut: buttons show until the first refusal; read it from the session once Wren's capability says.
+    /// Whether the conversation being read is in an account that can send (not a shared mailbox you can only read).
+    /// Wren's session says; with an older server it's learned when an answer is refused.
     var canSendHere: Bool {
-        threadPlace.map { !readOnly.contains("\($0.login) \($0.account)") } ?? false
+        guard let place = threadPlace else { return false }
+        if readOnly.contains("\(place.login) \(place.account)") { return false }
+        return login(place.login)?.accounts.first { $0.id == place.account }?.canSend ?? true
+    }
+
+    // MARK: Mailing lists
+
+    /// Unsubscribe from the list a message came from; Wren asks the list, or writes to it. When the list only has
+    /// a page for it, that's what comes back to open.
+    func unsubscribe(_ email: Email) async throws -> Unsubscribed {
+        guard let place = threadPlace, let login = login(place.login) else { throw NotConnected() }
+        let done = try await login.client.unsubscribe(from: email.id, account: place.account)
+        let sender = email.from?.first?.email.lowercased()
+        for i in thread.indices where thread[i].from?.first?.email.lowercased() == sender { thread[i].unsubscribed = true }
+        return done
     }
 
     /// Accept, maybe or decline the invitation in an email; the organizer gets the answer from Wren.
@@ -1009,6 +1083,15 @@ final class MailStore {
               let page = try? await login.client.conversations(account: inbox.account, mailbox: inbox.mailbox, limit: 20)
         else { return }
         let unread = page.list.map(\.email).filter(\.isUnread)
+        // Notifications about mail that's been read or filed since, here or anywhere else, go away.
+        // shortcut: only the newest 20 conversations are looked at, so with more unread than that the oldest
+        // notifications go too.
+        let center = UNUserNotificationCenter.current()
+        let current = Set(unread.map(\.id))
+        let stale = await center.deliveredNotifications()
+            .filter { $0.request.content.userInfo["login"] as? String == login.id && !current.contains($0.request.identifier) }
+            .map(\.request.identifier)
+        if !stale.isEmpty { center.removeDeliveredNotifications(withIdentifiers: stale) }
         let known = login.announced
         login.announced = (known ?? []).union(unread.map(\.id))
         guard let known else { return }
@@ -1019,9 +1102,10 @@ final class MailStore {
             content.body = email.preview ?? ""
             content.sound = .default
             content.categoryIdentifier = Self.newMail.identifier
+            content.threadIdentifier = email.threadId
             // Clicking it opens the conversation; its buttons are in notificationAction (both from AppDelegate).
             content.userInfo = ["login": login.id, "account": inbox.account, "mailbox": inbox.mailbox, "thread": email.threadId]
-            try? await UNUserNotificationCenter.current().add(UNNotificationRequest(identifier: email.id, content: content, trigger: nil))
+            try? await center.add(UNNotificationRequest(identifier: email.id, content: content, trigger: nil))
         }
     }
 }

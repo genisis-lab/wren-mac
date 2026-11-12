@@ -115,6 +115,14 @@ struct MailCommands: Commands {
             Button("Get New Mail") { Task { await store.refresh() } }
                 .keyboardShortcut("n", modifiers: [.command, .shift])
                 .disabled(!signedIn)
+            Divider()
+            Button(store.unreadOnly ? "Show All Messages" : "Show Unread Only") { Task { await store.toggleUnreadOnly() } }
+                .keyboardShortcut("l")
+                .disabled(!signedIn)
+            Button("Mark All as Read") {
+                if let ref = store.selectedMailbox { Task { await store.markAllRead(in: ref) } }
+            }
+            .disabled(!signedIn || (store.mailbox(store.selectedMailbox)?.unreadEmails ?? 0) == 0)
         }
         CommandMenu("Message") {
             Button("Reply") { if let d = store.replyDraft(all: false) { openWindow(id: "compose", value: d) } }
@@ -142,7 +150,7 @@ struct MailCommands: Commands {
             Button("Mark as Unread") { act { await $0.setRead($1, false) } }
                 .keyboardShortcut("u", modifiers: [.command, .shift])
                 .disabled(selection.isEmpty)
-            Button("Flag") { act { await $0.toggleFlag($1) } }
+            Button(store.selectionIsFlagged ? "Unflag" : "Flag") { act { await $0.toggleFlag($1) } }
                 .keyboardShortcut("l", modifiers: [.command, .shift])
                 .disabled(selection.isEmpty)
             Menu("Snooze") {

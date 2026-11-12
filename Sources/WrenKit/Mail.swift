@@ -20,8 +20,10 @@ extension JMAPClient {
     }
 
     /// The newest `limit` conversations in a mailbox, optionally matching a search, and how many there are in all.
-    public func conversations(account: String, mailbox: String, search: String = "", limit: Int) async throws -> (list: [Conversation], total: Int) {
+    /// With `unreadOnly`, just the conversations with unread mail there.
+    public func conversations(account: String, mailbox: String, search: String = "", unreadOnly: Bool = false, limit: Int) async throws -> (list: [Conversation], total: Int) {
         var filter: [String: JSON] = ["inMailbox": .string(mailbox)]
+        if unreadOnly { filter["notKeyword"] = "$seen" }
         let words = search.trimmingCharacters(in: .whitespacesAndNewlines)
         if !words.isEmpty { filter["text"] = .string(words) }
         let a = JSON.string(account)
@@ -53,8 +55,10 @@ extension JMAPClient {
     /// Every message of a conversation, oldest first, with bodies.
     public func conversation(account: String, threadId: String) async throws -> [Email] {
         let a = JSON.string(account)
-        // Asking for "invite" without the capability fails the request.
-        let properties = try await fullProperties + (currentSession().capabilities[Capability.wren] != nil ? ["invite"] : [])
+        // Asking for a property the server doesn't know fails the request.
+        let session = try await currentSession()
+        let wren = session.capabilities[Capability.wren] != nil ? session.accounts[account]?.accountCapabilities[Capability.wren] : nil
+        let properties = fullProperties + (wren != nil ? ["invite"] : []) + (wren?["unsubscribe"]?.bool == true ? ["canUnsubscribe", "unsubscribed"] : [])
         let r = try await call([
             ("Thread/get", ["accountId": a, "ids": [.string(threadId)]]),
             ("Email/get", [
@@ -126,6 +130,39 @@ extension JMAPClient {
         try checkSet(r[0])
     }
 
+    /// Mark every unread message in a mailbox as read. Returns how many there were.
+    @discardableResult
+    public func markAllRead(account: String, mailbox: String) async throws -> Int {
+        try await each(["inMailbox": .string(mailbox), "notKeyword": "$seen"], account: account) { ids in
+            ["update": .object(Dictionary(ids.map { ($0, Patch.keyword("$seen", true)) }, uniquingKeysWith: { a, _ in a }))]
+        }
+    }
+
+    /// Delete every message in a mailbox for good (Empty Trash). Returns how many there were.
+    @discardableResult
+    public func empty(account: String, mailbox: String) async throws -> Int {
+        try await each(["inMailbox": .string(mailbox)], account: account) { ids in ["destroy": .array(ids.map(JSON.string))] }
+    }
+
+    /// Change every message matching a filter, 500 at a time (the most Wren takes in one Email/set). Each round must
+    /// take its messages out of the filter, which is how the next round finds the rest.
+    private func each(_ filter: JSON, account: String, _ change: ([String]) -> [String: JSON]) async throws -> Int {
+        let a = JSON.string(account)
+        var done = 0
+        // shortcut: stops after 100,000 messages; run it again for a mailbox bigger than that.
+        for _ in 0..<200 {
+            let found = try await call([("Email/query", ["accountId": a, "filter": filter, "limit": 500])])
+            let ids = (found[0]["ids"]?.array ?? []).compactMap(\.string)
+            guard !ids.isEmpty else { break }
+            var args = change(ids)
+            args["accountId"] = a
+            let r = try await call([("Email/set", .object(args))])
+            try checkSet(r[0], ignoringMissing: true)
+            done += ids.count
+        }
+        return done
+    }
+
     /// Save a draft into Drafts (replacing the one it was opened from) and return its new id.
     public func save(_ draft: Draft, from identity: Identity, draftsMailbox: String) async throws -> String {
         var args: [String: JSON] = ["accountId": .string(draft.accountId), "create": ["draft": try draft.emailObject(from: identity, draftsMailbox: draftsMailbox)]]
@@ -169,6 +206,13 @@ extension JMAPClient {
         if !comment.isEmpty { args["comment"] = .string(comment) }
         let r = try await call([("Invite/reply", .object(args))])
         return r[0]["to"]?.string
+    }
+
+    /// Unsubscribe from the mailing list an email came from, as the web app's Unsubscribe button does.
+    public func unsubscribe(from emailId: String, account: String) async throws -> Unsubscribed {
+        let r = try await call([("MailingList/unsubscribe", ["accountId": .string(account), "emailId": .string(emailId)])])
+        guard let method = r[0]["method"]?.string else { throw JMAPError.badResponse }
+        return Unsubscribed(method: method, url: r[0]["url"]?.string.flatMap(URL.init(string:)), sender: r[0]["sender"]?.string)
     }
 
     /// The public keys Wren knows for each address (armored), lower-cased addresses as keys.
