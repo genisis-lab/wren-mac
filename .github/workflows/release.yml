@@ -49,7 +49,7 @@ jobs:
           xcodegen generate
           ./bundle.sh MARKETING_VERSION="$VERSION" CURRENT_PROJECT_VERSION="$BUILD" 'ARCHS=arm64 x86_64' ONLY_ACTIVE_ARCH=NO
           codesign --verify --deep --strict --verbose=2 build/Wren.app
-          lipo build/Wren.app/Contents/MacOS/Wren -verify_arch arm64 x86_64
+          lipo -archs build/Wren.app/Contents/MacOS/Wren | python3 -c 'import sys; assert {"arm64", "x86_64"}.issubset(sys.stdin.read().split()), "Missing universal architecture"' 
       - name: Sign archive and feed with Sparkle
         env:
           SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}
