@@ -58,11 +58,6 @@ jobs:
           # saves NAME-0.png… and NAME-screen.png, then NAME.done.
           run() {
             rm -f app.log
-            # Temporary: a backtrace for each AppKit log line (the NSTableView reentrancy warning).
-            sudo lldb -b -o "process attach --name Wren --waitfor" \
-              -o "breakpoint set -r '^(NSLog|NSLogv|_NSLogv)\$' --auto-continue true -C 'bt 80'" \
-              -o "continue" > lldb.log 2>&1 &
-            sleep 3
             open -W --stdout app.log --stderr app.log --env WREN_DEMO_OUT=$PWD/shots "$@" build/Wren.app &
             app=$!
             while kill -0 $app 2>/dev/null; do
@@ -79,13 +74,11 @@ jobs:
               sleep 0.2
             done
             cat app.log
-            sleep 2
-            echo "::group::lldb"; cat lldb.log || true; echo "::endgroup::"
             for left in shots/*.request; do
               if [ -e "$left" ]; then echo "::warning::No picture taken for ${left#shots/}"; rm "$left"; fi
             done
           }
-          for mode in dark; do
+          for mode in light dark; do
             dark=0; [ $mode = dark ] && dark=1
             run --env WREN_DEMO_TAG=$mode --env WREN_DEMO_DARK=$dark --env WREN_DEMO_SERVER=http://127.0.0.1:8787 \
               --env WREN_DEMO_USER=admin@wren.test --env WREN_DEMO_PASSWORD=$KEY --env WREN_DEMO_USER2=sam@wren.test --env WREN_DEMO_PASSWORD2=$KEY2
