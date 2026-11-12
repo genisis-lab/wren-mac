@@ -32,7 +32,13 @@ public struct Session: Decodable, Sendable {
     /// The accounts with mail: the person's own first, then each shared mailbox they belong to.
     public var mailAccounts: [Account] {
         accounts.filter { $0.value.accountCapabilities[Capability.mail] != nil }
-            .map { Account(id: $0.key, name: $0.value.name, isPersonal: $0.value.isPersonal, capabilities: Set($0.value.accountCapabilities.keys)) }
+            .map { id, info in
+                let wren = info.accountCapabilities[Capability.wren]
+                return Account(
+                    id: id, name: info.name, isPersonal: info.isPersonal, capabilities: Set(info.accountCapabilities.keys),
+                    canSend: wren?["canSend"]?.bool, canUnsubscribe: wren?["unsubscribe"]?.bool
+                )
+            }
             .sorted { ($0.isPersonal ? 0 : 1, $0.name) < ($1.isPersonal ? 0 : 1, $1.name) }
     }
 }
@@ -42,6 +48,10 @@ public struct Account: Codable, Hashable, Sendable, Identifiable {
     public var name: String
     public var isPersonal: Bool
     public var capabilities: Set<String>
+    /// Whether you can send from it (false in a shared mailbox you can only read); nil when the server doesn't say.
+    public var canSend: Bool?
+    /// Whether the server can unsubscribe from mailing lists for you (Wren's extension, newer servers).
+    public var canUnsubscribe: Bool?
 
     public var canSnooze: Bool { capabilities.contains(Capability.snooze) }
     /// Invitations, private links and PGP keys.
@@ -150,6 +160,10 @@ public struct Email: Codable, Hashable, Sendable, Identifiable {
     public var blobId: String?
     /// The calendar invitation in the message (Wren's extension), if any.
     public var invite: Invite?
+    /// List mail with an unsubscribe link Wren can use, and whether you've already unsubscribed from its sender
+    /// (Wren's extension).
+    public var canUnsubscribe: Bool?
+    public var unsubscribed: Bool?
 
     public var isUnread: Bool { keywords["$seen"] != true }
     public var isFlagged: Bool { keywords["$flagged"] == true }
@@ -243,6 +257,14 @@ public struct Invite: Codable, Hashable, Sendable {
         guard let end, end > start else { return start.formatted(.dateTime.weekday().month().day().hour().minute()) }
         return (start..<end).formatted(.interval.weekday().month().day().hour().minute())
     }
+}
+
+/// What unsubscribing from a mailing list did: Wren asked the list ("one-click"), sent the list's unsubscribe
+/// email ("email"), or has a page for you to finish on ("link", with its address).
+public struct Unsubscribed: Hashable, Sendable {
+    public var method: String
+    public var url: URL?
+    public var sender: String?
 }
 
 /// The person's private key as backed up in Wren on the web: still encrypted with their passphrase.

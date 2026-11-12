@@ -58,8 +58,9 @@ struct ReaderPane: View {
                 .disabled(!store.canReply)
         }
         ToolbarItemGroup {
-            Button { act { await $0.toggleFlag($1) } } label: { Label("Flag", systemImage: "flag") }
-                .help("Flag")
+            let flagged = store.selectionIsFlagged
+            Button { act { await $0.toggleFlag($1) } } label: { Label(flagged ? "Unflag" : "Flag", systemImage: flagged ? "flag.slash" : "flag") }
+                .help(flagged ? "Unflag" : "Flag")
                 .disabled(none)
             Menu {
                 ForEach(SnoozeTime.choices(), id: \.title) { choice in
@@ -83,8 +84,9 @@ struct ConversationView: View {
         let thread = store.thread
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
-                if let last = thread.last {
-                    Text((last.subject ?? "").isEmpty ? "(No Subject)" : last.subject!)
+                // The conversation's subject is its first message's; later ones only add "Re:".
+                if let first = thread.first {
+                    Text((first.subject ?? "").isEmpty ? "(No Subject)" : first.subject!)
                         .font(.title2.weight(.semibold))
                         .textSelection(.enabled)
                         .padding(.horizontal, 20)
@@ -92,7 +94,9 @@ struct ConversationView: View {
                         .padding(.bottom, 4)
                 }
                 ForEach(thread) { email in
-                    let expanded = email.id == thread.last?.id || opened.contains(email.id) || store.unreadWhenOpened.contains(email.id)
+                    // An invitation still waiting for an answer stays open, however old.
+                    let waiting = email.invite.map { $0.canReply == true && !$0.isCancelled && $0.answer == nil } ?? false
+                    let expanded = email.id == thread.last?.id || opened.contains(email.id) || store.unreadWhenOpened.contains(email.id) || waiting
                     MessageView(email: email, expanded: expanded) {
                         if opened.contains(email.id) { opened.remove(email.id) } else { opened.insert(email.id) }
                     }
@@ -131,6 +135,7 @@ struct MessageView: View {
                     Button("Edit Draft") { openWindow(id: "compose", value: draft) }
                 }
                 if let invite = email.invite { InviteCard(email: email, invite: invite) }
+                if email.canUnsubscribe == true, !email.isDraft, email.unsubscribed == true || store.canSendHere { UnsubscribeRow(email: email) }
                 if let kind = PGPKind(email) {
                     PGPMessageView(email: email, kind: kind)
                 } else {
@@ -229,6 +234,49 @@ struct MessageView: View {
         .menuIndicator(.hidden)
         .fixedSize()
         .accessibilityLabel("Message actions")
+    }
+}
+
+/// List mail: unsubscribe from here, as on the web. Wren asks the list or writes to it; a list that only has a
+/// page for it gets that page opened.
+struct UnsubscribeRow: View {
+    let email: Email
+    @Environment(MailStore.self) private var store
+    @State private var working = false
+    @State private var note: String?
+
+    var body: some View {
+        HStack {
+            if note != nil || email.unsubscribed == true {
+                Label(note ?? "You unsubscribed from this sender.", systemImage: "checkmark.circle")
+            } else {
+                Label("This is from a mailing list.", systemImage: "newspaper")
+                Spacer()
+                Button("Unsubscribe") { unsubscribe() }
+                    .disabled(working)
+            }
+        }
+        .font(.callout)
+        .foregroundStyle(.secondary)
+    }
+
+    private func unsubscribe() {
+        working = true
+        Task {
+            defer { working = false }
+            do {
+                let done = try await store.unsubscribe(email)
+                switch done.method {
+                case "link":
+                    if let url = done.url, ["http", "https"].contains(url.scheme?.lowercased() ?? "") { NSWorkspace.shared.open(url) }
+                    note = "Finish unsubscribing on the page that opened."
+                case "email": note = "Wren sent the list a request to unsubscribe you."
+                default: note = "You’re unsubscribed."
+                }
+            } catch {
+                store.alert = error.localizedDescription
+            }
+        }
     }
 }
 
