@@ -281,6 +281,29 @@ final class WrenKitTests: XCTestCase {
         XCTAssertEqual(clean("mailto:ada@example.com?subject=utm_x"), "mailto:ada@example.com?subject=utm_x")
     }
 
+    func testForgottenAttachmentsAreNoticed() {
+        var d = Draft(accountId: "u1")
+        d.setHTML("Here’s the plan, attached.<br><br><div class=\"wren-signature\">Ada</div>")
+        XCTAssertTrue(d.forgotAttachment)
+        d.files = [Draft.File(blobId: "B1", name: "plan.pdf", type: "application/pdf", size: 1)]
+        XCTAssertFalse(d.forgotAttachment)
+        // Only what you wrote counts: not the quote you're answering, nor your signature.
+        var reply = Draft(accountId: "u1")
+        reply.setHTML("Sounds good.<br><br><div class=\"wren-quote\"><div>Grace wrote:</div><blockquote>I attached the slides.</blockquote></div>")
+        XCTAssertFalse(reply.forgotAttachment)
+        var signed = Draft(accountId: "u1")
+        signed.setHTML("Thanks!<br><br><div class=\"wren-signature\">Attachments are scanned</div>")
+        XCTAssertFalse(signed.forgotAttachment)
+        var plain = Draft(accountId: "u1")
+        plain.body = "See the enclosed form.\n\nOn 1 Dec, Grace wrote:\n\n> attached"
+        XCTAssertTrue(plain.forgotAttachment)
+        plain.body = "Thanks!\n\nOn 1 Dec, Grace wrote:\n\n> attached"
+        XCTAssertFalse(plain.forgotAttachment)
+        // Words that only start the same don't count.
+        plain.body = "I'm attachedness-free"
+        XCTAssertFalse(plain.forgotAttachment)
+    }
+
     func testSignaturesKeepTheirFormatting() {
         let rich = Identity(id: "I1", name: "Ada", email: "ada@wren.test", textSignature: "Ada Wren", htmlSignature: "<b>Ada</b> <a href=\"https://wren.test\">Wren</a>")
         let d = Draft.new(account: "u1", identity: rich)

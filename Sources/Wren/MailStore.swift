@@ -601,6 +601,12 @@ final class MailStore {
         return emails.filter { email in showTrash || trash.map { email.mailboxIds[$0] != true } ?? true }
     }
 
+    /// The raw source of a message (the newest in the reader, by default).
+    func sourceKey(of email: Email? = nil, in place: MailboxRef? = nil) -> RawSourceKey? {
+        guard let email = email ?? replyTarget, let blobId = email.blobId, let place = place ?? threadPlace else { return nil }
+        return RawSourceKey(place: place, blobId: blobId, subject: email.subject ?? "")
+    }
+
     /// A conversation from the list in a window of its own.
     func openInWindow(_ id: String) {
         guard let place = place(of: id) else { return }

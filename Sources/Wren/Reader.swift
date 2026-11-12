@@ -83,40 +83,12 @@ struct ReaderPane: View {
     }
 }
 
-/// A conversation, oldest message first. Older read messages fold to one line; click to open them.
+/// The conversation open in the reader.
 struct ConversationView: View {
     @Environment(MailStore.self) private var store
-    @State private var opened: Set<String> = []
 
     var body: some View {
-        let thread = store.thread
-        ScrollView {
-            VStack(alignment: .leading, spacing: 0) {
-                // The conversation's subject is its first message's; later ones only add "Re:".
-                if let first = thread.first {
-                    Text((first.subject ?? "").isEmpty ? "(No Subject)" : first.subject!)
-                        .font(.title2.weight(.semibold))
-                        .textSelection(.enabled)
-                        .padding(.horizontal, 20)
-                        .padding(.top, 20)
-                        .padding(.bottom, 4)
-                }
-                ForEach(thread) { email in
-                    // An invitation still waiting for an answer stays open, however old.
-                    let waiting = email.invite.map { $0.canReply == true && !$0.isCancelled && $0.answer == nil } ?? false
-                    let expanded = email.id == thread.last?.id || opened.contains(email.id) || store.unreadWhenOpened.contains(email.id) || waiting
-                    MessageView(email: email, expanded: expanded) {
-                        if opened.contains(email.id) { opened.remove(email.id) } else { opened.insert(email.id) }
-                    }
-                    if email.id != thread.last?.id { Divider().padding(.leading, 66) }
-                }
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-        }
-        .background(Color(nsColor: .textBackgroundColor))
-        .overlay {
-            if thread.isEmpty { ProgressView() }
-        }
+        ConversationMessages(thread: store.thread, keepOpen: store.unreadWhenOpened)
     }
 }
 
@@ -235,6 +207,9 @@ struct MessageView: View {
             Button("Reply") { if let d = store.replyDraft(to: email, all: false, in: windowPlace) { openWindow(id: "compose", value: d) } }
             Button("Reply All") { if let d = store.replyDraft(to: email, all: true, in: windowPlace) { openWindow(id: "compose", value: d) } }
             Button("Forward") { if let d = store.forwardDraft(of: email, in: windowPlace) { openWindow(id: "compose", value: d) } }
+            Divider()
+            Button("Raw Source") { if let key = store.sourceKey(of: email, in: windowPlace) { openWindow(id: "source", value: key) } }
+                .disabled(email.blobId == nil)
         } label: {
             Image(systemName: "ellipsis.circle")
         }
@@ -302,23 +277,49 @@ struct MessageBody: View {
     let allowRemote: Bool
     @Environment(MailStore.self) private var store
     @Environment(\.conversationPlace) private var windowPlace
+    @Environment(\.find) private var find
+    @AppStorage(ReaderTextSize.key) private var textSize = 1.0
     @State private var height: CGFloat = 80
+    /// Where Find's current match is, from the top of the message.
+    @State private var matchY: CGFloat = 0
 
     var body: some View {
-        if let html {
-            MessageWebView(html: html, allowRemote: allowRemote, inline: email.attachments ?? [], download: { [store, windowPlace] in try await store.download($0, in: windowPlace) }, openLink: open, height: $height)
+        Group {
+            if let html {
+                MessageWebView(
+                    html: html, allowRemote: allowRemote, inline: email.attachments ?? [],
+                    download: { [store, windowPlace] in try await store.download($0, in: windowPlace) }, openLink: open, height: $height,
+                    zoom: textSize, find: find?.query ?? "", findCurrent: find?.current,
+                    onFound: { [find] count, y in
+                        if let y { matchY = y }
+                        find?.report(count, y != nil)
+                    }
+                )
                 .frame(height: height)
                 // Mail with colors of its own sits on its own page.
                 .clipShape(RoundedRectangle(cornerRadius: MessageWebView.followsAppearance(html) ? 0 : 8))
                 .accessibilityLabel("Message")
-        } else {
-            Text(linked(email.text))
-                .textSelection(.enabled)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .environment(\.openURL, OpenURLAction { url in
-                    open(url)
-                    return .handled
-                })
+            } else {
+                Text(linked(email.text, marking: find))
+                    .font(.system(size: NSFont.systemFontSize * textSize))
+                    .textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .environment(\.openURL, OpenURLAction { url in
+                        open(url)
+                        return .handled
+                    })
+                    .task(id: "\(find?.query ?? "") \(find?.current ?? -1)") {
+                        guard let find else { return }
+                        matchY = 0
+                        find.report(FindRequest.ranges(of: find.query, in: email.text).count, find.current != nil)
+                    }
+            }
+        }
+        // Find scrolls here: the current match (or, in plain text, the top of the message holding it).
+        .overlay(alignment: .topLeading) {
+            if find?.current != nil {
+                Color.clear.frame(width: 1, height: 1).padding(.top, matchY).id(FindRequest.marker)
+            }
         }
     }
 
@@ -331,11 +332,20 @@ struct MessageBody: View {
         }
     }
 
-    private func linked(_ text: String) -> AttributedString {
+    private func linked(_ text: String, marking find: FindRequest?) -> AttributedString {
         var s = AttributedString(text)
-        guard let detector = try? NSDataDetector(types: NSTextCheckingResult.CheckingType.link.rawValue) else { return s }
-        for match in detector.matches(in: text, range: NSRange(text.startIndex..., in: text)) {
-            if let url = match.url, let range = Range(match.range, in: s) { s[range].link = url }
+        if let detector = try? NSDataDetector(types: NSTextCheckingResult.CheckingType.link.rawValue) {
+            for match in detector.matches(in: text, range: NSRange(text.startIndex..., in: text)) {
+                if let url = match.url, let range = Range(match.range, in: s) { s[range].link = url }
+            }
+        }
+        // Find's matches, marked as in a web page: the current one orange.
+        if let find {
+            for (i, r) in FindRequest.ranges(of: find.query, in: text).enumerated() {
+                guard let range = Range(NSRange(r, in: text), in: s) else { continue }
+                s[range][AttributeScopes.SwiftUIAttributes.BackgroundColorAttribute.self] = i == find.current ? Color.orange : Color.yellow.opacity(0.6)
+                s[range][AttributeScopes.SwiftUIAttributes.ForegroundColorAttribute.self] = Color.black
+            }
         }
         return s
     }

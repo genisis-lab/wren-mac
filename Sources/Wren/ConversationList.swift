@@ -16,6 +16,22 @@ struct ConversationList: View {
                     .tag(conversation.id)
                     // Onto a sidebar mailbox or label (the whole selection, when this row is in it).
                     .draggable(store.dragPayload(for: conversation.id))
+                    // VoiceOver's Actions rotor: what swipes and the right-click menu do.
+                    .accessibilityAction(named: conversation.email.isUnread ? "Mark as Read" : "Mark as Unread") {
+                        Task { await store.setRead([conversation.id], conversation.email.isUnread) }
+                    }
+                    .accessibilityAction(named: conversation.email.isFlagged ? "Unflag" : "Flag") {
+                        Task { await store.toggleFlag([conversation.id]) }
+                    }
+                    .accessibilityAction(named: store.canMoveToInbox ? "Move to Inbox" : "Archive") {
+                        Task {
+                            if store.canMoveToInbox { await store.moveToInbox([conversation.id]) } else { await store.archive([conversation.id]) }
+                        }
+                    }
+                    .accessibilityAction(named: store.currentRole == "trash" ? "Delete Forever" : "Move to Trash") {
+                        Task { await store.trash([conversation.id]) }
+                    }
+                    .accessibilityAction(named: "Open in New Window") { store.openInWindow(conversation.id) }
                     .swipeActions(edge: .leading) {
                         let unread = conversation.email.isUnread
                         Button {

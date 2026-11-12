@@ -11,73 +11,48 @@ struct ConversationWindow: View {
     @Environment(\.openWindow) private var openWindow
     @Environment(\.dismiss) private var dismiss
     @State private var thread: [Email] = []
-    @State private var opened: Set<String> = []
     @State private var problem: String?
 
     private var place: MailboxRef? { value?.place }
     private var role: String? { store.mailbox(place)?.role }
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 0) {
-                if let first = thread.first {
-                    Text((first.subject ?? "").isEmpty ? "(No Subject)" : first.subject!)
-                        .font(.title2.weight(.semibold))
-                        .textSelection(.enabled)
-                        .padding(.horizontal, 20)
-                        .padding(.top, 20)
-                        .padding(.bottom, 4)
-                }
-                ForEach(thread) { email in
-                    let waiting = email.invite.map { $0.canReply == true && !$0.isCancelled && $0.answer == nil } ?? false
-                    let expanded = email.id == thread.last?.id || opened.contains(email.id) || waiting
-                    MessageView(email: email, expanded: expanded) {
-                        if opened.contains(email.id) { opened.remove(email.id) } else { opened.insert(email.id) }
-                    }
-                    if email.id != thread.last?.id { Divider().padding(.leading, 66) }
-                }
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-        }
-        .background(Color(nsColor: .textBackgroundColor))
-        .environment(\.conversationPlace, place)
-        .overlay {
-            if thread.isEmpty {
-                if let problem {
+        ConversationMessages(thread: thread)
+            .environment(\.conversationPlace, place)
+            .overlay {
+                if thread.isEmpty, let problem {
                     ContentUnavailableView("Can’t Show This Conversation", systemImage: "exclamationmark.triangle", description: Text(problem))
-                } else {
-                    ProgressView()
+                        .background(Color(nsColor: .textBackgroundColor))
                 }
             }
-        }
-        .navigationTitle(thread.first?.subject ?? "Conversation")
-        .focusedSceneValue(\.printable, thread.isEmpty ? nil : Printable(emails: thread))
-        .toolbar {
-            ToolbarItemGroup {
-                Button { act { await store.archive($0, in: $1) } } label: { Label("Archive", systemImage: "archivebox") }
-                    .help("Archive")
-                    .disabled(["archive", "drafts", "sent"].contains(role ?? ""))
-                Button { act { await store.trash($0, in: $1) } } label: { Label("Trash", systemImage: "trash") }
-                    .help("Move to Trash")
-                    .disabled(role == "trash")
+            .navigationTitle(thread.first?.subject ?? "Conversation")
+            .focusedSceneValue(\.printable, thread.isEmpty ? nil : Printable(emails: thread))
+            .toolbar {
+                ToolbarItemGroup {
+                    Button { act { await store.archive($0, in: $1) } } label: { Label("Archive", systemImage: "archivebox") }
+                        .help("Archive")
+                        .disabled(["archive", "drafts", "sent"].contains(role ?? ""))
+                    Button { act { await store.trash($0, in: $1) } } label: { Label("Trash", systemImage: "trash") }
+                        .help("Move to Trash")
+                        .disabled(role == "trash")
+                }
+                ToolbarItemGroup {
+                    Button { compose(store.replyDraft(to: newest, all: false, in: place)) } label: { Label("Reply", systemImage: "arrowshape.turn.up.left") }
+                        .help("Reply")
+                    Button { compose(store.replyDraft(to: newest, all: true, in: place)) } label: { Label("Reply All", systemImage: "arrowshape.turn.up.left.2") }
+                        .help("Reply All")
+                    Button { compose(store.forwardDraft(of: newest, in: place)) } label: { Label("Forward", systemImage: "arrowshape.turn.up.right") }
+                        .help("Forward")
+                }
+                ToolbarItem {
+                    Button { Printer.print(thread, decrypted: store.decrypted) } label: { Label("Print", systemImage: "printer") }
+                        .help("Print (⌘P)")
+                        .disabled(thread.isEmpty)
+                }
             }
-            ToolbarItemGroup {
-                Button { compose(store.replyDraft(to: newest, all: false, in: place)) } label: { Label("Reply", systemImage: "arrowshape.turn.up.left") }
-                    .help("Reply")
-                Button { compose(store.replyDraft(to: newest, all: true, in: place)) } label: { Label("Reply All", systemImage: "arrowshape.turn.up.left.2") }
-                    .help("Reply All")
-                Button { compose(store.forwardDraft(of: newest, in: place)) } label: { Label("Forward", systemImage: "arrowshape.turn.up.right") }
-                    .help("Forward")
-            }
-            ToolbarItem {
-                Button { Printer.print(thread, decrypted: store.decrypted) } label: { Label("Print", systemImage: "printer") }
-                    .help("Print (⌘P)")
-                    .disabled(thread.isEmpty)
-            }
-        }
-        // Loads again whenever the main window does (an action, or the server saying something changed).
-        .task(id: store.reloads) { await load() }
-        .frame(minWidth: 480, minHeight: 360)
+            // Loads again whenever the main window does (an action, or the server saying something changed).
+            .task(id: store.reloads) { await load() }
+            .frame(minWidth: 480, minHeight: 360)
     }
 
     private var newest: Email? { thread.last { !$0.isDraft } }

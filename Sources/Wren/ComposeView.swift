@@ -32,6 +32,9 @@ struct ComposeView: View {
     /// With Encrypt on: who has no PGP key Wren knows.
     @State private var missingKeys: [String] = []
     @State private var confirmingPlain = false
+    /// Asking before sending: no subject, or an attachment that's mentioned but missing. Holds the time to send at.
+    @State private var checking: SendCheck?
+    @AppStorage("warnBeforeSending") private var warnBeforeSending = true
     /// The background saves to Drafts (sending and closing wait for one under way, so the two don't both make a draft).
     @State private var copy = DraftCopy()
 
@@ -184,6 +187,13 @@ struct ComposeView: View {
             try? await Task.sleep(for: .milliseconds(400))
             let missing = await store.missingKeys(draft)
             if !Task.isCancelled { missingKeys = missing }
+        }
+        .confirmationDialog(checking?.title ?? "", isPresented: Binding(get: { checking != nil }, set: { if !$0 { checking = nil } }), titleVisibility: .visible, presenting: checking) { check in
+            Button(check.attachment ? "Send Without Attachment" : "Send Without Subject") { send(at: check.date, checked: true) }
+            if check.attachment { Button("Attach Files…") { picking = true } }
+            Button("Cancel", role: .cancel) {}
+        } message: { check in
+            Text(check.message)
         }
         .confirmationDialog("Turn off encryption?", isPresented: $confirmingPlain) {
             Button("Send Unencrypted", role: .destructive) { draft.encrypt = false }
@@ -445,7 +455,7 @@ struct ComposeView: View {
         }
     }
 
-    private func send(at date: Date?) {
+    private func send(at date: Date?, checked: Bool = false) {
         do {
             guard try !draft.recipients.isEmpty else {
                 error = "Add someone to send this to."
@@ -454,6 +464,11 @@ struct ComposeView: View {
         } catch {
             self.error = error.localizedDescription
             return
+        }
+        // Mail's reminders (Settings → General).
+        if warnBeforeSending, !checked {
+            if draft.forgotAttachment { return checking = SendCheck(date: date, attachment: true) }
+            if draft.subject.trimmingCharacters(in: .whitespaces).isEmpty { return checking = SendCheck(date: date, attachment: false) }
         }
         busy = true
         error = nil
@@ -525,6 +540,16 @@ struct ComposeView: View {
                 store.alert = "Your draft couldn’t be saved: \(error.localizedDescription)"
             }
         }
+    }
+}
+
+/// A question before sending.
+struct SendCheck {
+    var date: Date?
+    var attachment: Bool
+    var title: String { attachment ? "Did you mean to attach something?" : "Send without a subject?" }
+    var message: String {
+        attachment ? "Your message mentions an attachment, but nothing is attached." : "This message has no subject."
     }
 }
 

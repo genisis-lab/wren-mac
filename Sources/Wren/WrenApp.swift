@@ -30,6 +30,13 @@ struct WrenApp: App {
         .defaultSize(width: 760, height: 640)
         .handlesExternalEvents(matching: [])
 
+        WindowGroup("Source", id: "source", for: RawSourceKey.self) { $key in
+            RawSourceWindow(value: $key)
+                .environment(store)
+        }
+        .defaultSize(width: 720, height: 560)
+        .handlesExternalEvents(matching: [])
+
         WindowGroup("New Message", id: "compose", for: Draft.self) { $draft in
             ComposeView(value: $draft)
                 .environment(store)
@@ -100,6 +107,31 @@ struct RootView: View {
     }
 }
 
+/// View → Bigger, Smaller and Actual Size: the text of messages in the reader and conversation windows, remembered.
+struct ReaderTextSize: View {
+    static let key = "readerTextSize"
+    static let sizes: [Double] = [0.8, 0.9, 1, 1.1, 1.25, 1.5, 1.75, 2]
+    @AppStorage(key) private var size = 1.0
+
+    var body: some View {
+        Divider()
+        Button("Bigger") { step(1) }
+            .keyboardShortcut("+")
+            .disabled(size >= Self.sizes.last!)
+        Button("Smaller") { step(-1) }
+            .keyboardShortcut("-")
+            .disabled(size <= Self.sizes.first!)
+        Button("Actual Size") { size = 1 }
+            .keyboardShortcut("0")
+            .disabled(size == 1)
+    }
+
+    private func step(_ by: Int) {
+        let at = Self.sizes.firstIndex { $0 >= size } ?? Self.sizes.count - 1
+        size = Self.sizes[min(max(at + by, 0), Self.sizes.count - 1)]
+    }
+}
+
 /// File → Print… (⌘P): the conversation in the focused window.
 struct PrintCommand: View {
     let store: MailStore
@@ -134,6 +166,7 @@ struct MailCommands: Commands {
                 .disabled(selection.count != 1)
         }
         CommandGroup(replacing: .printItem) { PrintCommand(store: store) }
+        CommandGroup(after: .toolbar) { ReaderTextSize() }
         CommandMenu("Mailbox") {
             Button("Get New Mail") { Task { await store.refresh() } }
                 .keyboardShortcut("n", modifiers: [.command, .shift])
@@ -165,6 +198,9 @@ struct MailCommands: Commands {
             Button("Forward") { if let d = store.forwardDraft() { openWindow(id: "compose", value: d) } }
                 .keyboardShortcut("f", modifiers: [.command, .shift])
                 .disabled(!store.canReply)
+            Button("Raw Source") { if let key = store.sourceKey() { openWindow(id: "source", value: key) } }
+                .keyboardShortcut("u", modifiers: [.command, .option])
+                .disabled(!store.canReply || store.replyTarget?.blobId == nil)
             Divider()
             Button("Archive") { act { await $0.archive($1) } }
                 .keyboardShortcut("a", modifiers: [.command, .control])

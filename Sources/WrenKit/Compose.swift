@@ -198,6 +198,30 @@ public struct Draft: Codable, Hashable, Sendable, Identifiable {
         return html(fromText: sig)
     }
 
+    /// What you wrote yourself: the message without the quote it answers or forwards, and without the signature.
+    public var ownText: String {
+        if let html {
+            var mine = html
+            for marker in ["<div class=\"wren-quote\"", "<div class=\"wren-signature\""] {
+                if let r = mine.range(of: marker) { mine = String(mine[..<r.lowerBound]) }
+            }
+            return plainText(fromHTML: mine)
+        }
+        // Plain text: up to the quote's "wrote:" line or "Begin forwarded message:", leaving out quoted lines.
+        var lines: [Substring] = []
+        for line in body.split(separator: "\n", omittingEmptySubsequences: false) {
+            if line.hasPrefix("Begin forwarded message:") || (line.hasSuffix("wrote:") && line.hasPrefix("On ")) { break }
+            if !line.hasPrefix(">") { lines.append(line) }
+        }
+        return lines.joined(separator: "\n")
+    }
+
+    /// Whether what you wrote talks about an attachment ("attached", "see attachment", "enclosed") while nothing is
+    /// attached: the reminder Mail gives before sending.
+    public var forgotAttachment: Bool {
+        files.isEmpty && ownText.range(of: #"(?i)\b(attach(ed|ing|ment|ments)?|enclosed|pfa)\b"#, options: .regularExpression) != nil
+    }
+
     /// Plain text as editor HTML: escaped, with line breaks kept.
     public static func html(fromText text: String) -> String {
         escapeHTML(text).replacingOccurrences(of: "\n", with: "<br>")
