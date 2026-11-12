@@ -73,6 +73,32 @@ extension JMAPClient {
         return (emails.map { Conversation(email: $0, count: counts[$0.threadId] ?? 1, snippet: snippets[$0.id]) }, r[0]["total"]?.int ?? emails.count)
     }
 
+    /// What changed in an account's mail since a state (Email/changes, RFC 8620 5.2), following `hasMoreChanges` to
+    /// the end. Throws `cannotCalculateChanges` when the state is too old; then load again from the start.
+    public func emailChanges(account: String, since state: String) async throws -> EmailChanges {
+        var out = EmailChanges(newState: state)
+        var since = state
+        for _ in 0..<20 {
+            let r = try await call([("Email/changes", ["accountId": .string(account), "sinceState": .string(since), "maxChanges": 500])])
+            out.created += (r[0]["created"]?.array ?? []).compactMap(\.string)
+            out.updated += (r[0]["updated"]?.array ?? []).compactMap(\.string)
+            out.destroyed += (r[0]["destroyed"]?.array ?? []).compactMap(\.string)
+            guard let next = r[0]["newState"]?.string else { throw JMAPError.badResponse }
+            since = next
+            out.newState = next
+            if r[0]["hasMoreChanges"]?.bool != true { return out.tidied() }
+        }
+        // Far too much changed to follow one by one.
+        throw JMAPError.method("cannotCalculateChanges", nil)
+    }
+
+    /// Some messages as the list shows them (no bodies).
+    public func emails(_ ids: [String], account: String) async throws -> [Email] {
+        guard !ids.isEmpty else { return [] }
+        let r = try await call([("Email/get", ["accountId": .string(account), "ids": .array(ids.map(JSON.string)), "properties": listProperties])])
+        return try (r[0]["list"] ?? []).decode([Email].self)
+    }
+
     /// Every message of a conversation, oldest first, with bodies.
     public func conversation(account: String, threadId: String) async throws -> [Email] {
         let a = JSON.string(account)
@@ -255,6 +281,30 @@ extension JMAPClient {
         ])
         try checkSet(r[0])
         return r[1]["list"]?.array?.first?["emailId"]?.string
+    }
+}
+
+/// Messages made, changed and deleted since a state.
+public struct EmailChanges: Sendable, Equatable {
+    public var created: [String] = []
+    public var updated: [String] = []
+    public var destroyed: [String] = []
+    public var newState: String
+
+    public var isEmpty: Bool { created.isEmpty && updated.isEmpty && destroyed.isEmpty }
+
+    /// Across several pages an id can show up more than once: made then changed is made, anything deleted is deleted.
+    func tidied() -> EmailChanges {
+        func unique(_ ids: [String]) -> [String] {
+            var seen = Set<String>()
+            return ids.filter { seen.insert($0).inserted }
+        }
+        var out = self
+        let gone = Set(destroyed), made = Set(created)
+        out.created = unique(created.filter { !gone.contains($0) })
+        out.updated = unique(updated.filter { !gone.contains($0) && !made.contains($0) })
+        out.destroyed = unique(destroyed)
+        return out
     }
 }
 

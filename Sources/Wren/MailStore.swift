@@ -39,6 +39,9 @@ final class Login: Identifiable {
     @ObservationIgnored var listening: Task<Void, Never>?
     /// Inbox messages already notified about (nil until the first look, so mail that was already there isn't announced).
     @ObservationIgnored var announced: Set<String>?
+    /// Each account's state as last brought up to date from the push stream, and newer ones it has said since.
+    @ObservationIgnored var states: [String: String] = [:]
+    @ObservationIgnored var pushedStates: [String: String] = [:]
 
     init(_ client: JMAPClient) {
         let key = Login.key(server: client.server, username: client.username)
@@ -177,6 +180,8 @@ final class MailStore {
     @ObservationIgnored private var reloading: Task<Void, Never>?
     @ObservationIgnored private var reloadAll = false
     @ObservationIgnored private var reloadLogins: Set<String> = []
+    /// Sign-ins whose push said what changed, to bring up to date with only that (see `sync`).
+    @ObservationIgnored private var syncLogins: Set<String> = []
     @ObservationIgnored private var reloadsAsked = 0
     @ObservationIgnored private var reloadsDone = 0
     /// Watches for the network coming back, to reconnect at once rather than when the old connection times out.
@@ -309,6 +314,8 @@ final class MailStore {
         decrypted = [:]
         login.cache.delete()
         Spotlight.forget(login: login.id)
+        queued.removeAll { $0.place.login == login.id }
+        QueuedChange.save(queued)
         logins.removeAll { $0 === login }
         save()
         undoManager?.removeAllActions()
@@ -348,10 +355,11 @@ final class MailStore {
                 let session = try await login.client.connect()
                 login.accounts = session.mailAccounts
                 for account in login.accounts { login.identities[account.id] = try await login.client.identities(account: account.id) }
+                await sendQueued(login)
                 openPending()
                 delay = 2
                 // Wren sends the current state as soon as the stream opens, so this also loads everything.
-                try await login.client.listen { [weak self] in await self?.refresh(login) }
+                try await login.client.listen { [weak self] changed in await self?.pushed(changed, to: login) }
             } catch JMAPError.unauthorized(_) {
                 remove(login, message: "Wren didn’t accept the app password for \(login.username). If it was revoked, create a new one in Wren and sign in again.")
                 return
@@ -396,8 +404,14 @@ final class MailStore {
         await refresh(logins: Set(places.map(\.login)))
     }
 
-    private func refresh(logins ids: Set<String>?) async {
-        if let ids { reloadLogins.formUnion(ids) } else { reloadAll = true }
+    private func refresh(logins ids: Set<String>?, syncing: Set<String> = []) async {
+        if !syncing.isEmpty {
+            syncLogins.formUnion(syncing)
+        } else if let ids {
+            reloadLogins.formUnion(ids)
+        } else {
+            reloadAll = true
+        }
         reloadsAsked += 1
         let asked = reloadsAsked
         while reloadsDone < asked {
@@ -407,12 +421,23 @@ final class MailStore {
             }
             let all = reloadAll
             let only = reloadLogins
+            let sync = syncLogins
             let upTo = reloadsAsked
             reloadAll = false
             reloadLogins = []
+            syncLogins = []
             // Bookkeeping happens inside the task, so whoever wakes first after it sees it finished.
             let task = Task { [self] in
-                await reload(all ? nil : logins.filter { only.contains($0.id) })
+                if all || !only.isEmpty { await reload(all ? nil : logins.filter { only.contains($0.id) }) }
+                for login in logins where sync.contains(login.id) {
+                    // Just loaded in full: what the push said is already showing.
+                    if all || only.contains(login.id) {
+                        login.states.merge(login.pushedStates) { $1 }
+                        login.pushedStates = [:]
+                    } else {
+                        await self.sync(login)
+                    }
+                }
                 reloadsDone = upTo
                 reloading = nil
             }
@@ -448,6 +473,103 @@ final class MailStore {
         if let threadId, touched == nil || touched?.contains(threadPlace?.login ?? "") == true { await loadThread(threadId) }
     }
 
+    // MARK: Keeping up with the server
+
+    /// The push stream said these accounts changed. The first time (nothing to compare with) everything loads;
+    /// after that only what changed does (`sync`).
+    private func pushed(_ changed: [String: String], to login: Login) async {
+        let fresh = changed.filter { account, state in login.states[account] != state && login.accounts.contains { $0.id == account } }
+        if changed.isEmpty || login.states.isEmpty {
+            // A server that doesn't say, or the first word since connecting: load it all.
+            login.states.merge(changed) { $1 }
+            return await refresh(login)
+        }
+        guard !fresh.isEmpty else { return }
+        login.pushedStates.merge(fresh) { $1 }
+        await refresh(logins: nil, syncing: [login.id])
+    }
+
+    /// Bring a sign-in up to date with only what changed since the last push: each changed account's mailbox counts,
+    /// the list's rows patched in place when only flags or read state changed (searched again when mail came, went or
+    /// moved), and the open conversation only when its own messages changed. Falls back to loading it all.
+    private func sync(_ login: Login) async {
+        let pushed = login.pushedStates
+        login.pushedStates = [:]
+        var listChanged = false, threadChanged = false, arrived = false
+        do {
+            for (account, newState) in pushed {
+                guard let old = login.states[account] else { throw JMAPError.method("cannotCalculateChanges", nil) }
+                let changes = try await login.client.emailChanges(account: account, since: old)
+                login.mailboxes[account] = try await login.client.mailboxes(account: account)
+                login.states[account] = changes.newState == old ? newState : changes.newState
+                guard !changes.isEmpty else { continue }
+                if !changes.created.isEmpty { arrived = true }
+                let shown = listShows(login, account: account)
+                let open = threadPlace.map { $0.login == login.id && $0.account == account } ?? false
+                guard shown || open else { continue }
+                let fetched = try await login.client.emails(changes.created + changes.updated, account: account)
+                if shown {
+                    if !changes.created.isEmpty || !changes.destroyed.isEmpty || searchingEverywhere {
+                        listChanged = true
+                    } else if !patchRows(fetched.filter { changes.updated.contains($0.id) }, login: login, account: account) {
+                        listChanged = true
+                    }
+                }
+                if open, let threadId {
+                    let mine = Set(thread.map(\.id))
+                    if fetched.contains(where: { $0.threadId == threadId }) || changes.destroyed.contains(where: mine.contains) { threadChanged = true }
+                }
+            }
+        } catch {
+            if Self.isOffline(error) {
+                login.problem = error.localizedDescription
+                return
+            }
+            // Too old to follow, or the server doesn't keep changes: load it all, from the newest state.
+            login.states.merge(pushed) { $1 }
+            await reload([login])
+            return
+        }
+        login.cache.state = .init(accounts: login.accounts, mailboxes: login.mailboxes, identities: login.identities)
+        login.problem = nil
+        if arrived {
+            if let personal = login.personal, personal.capabilities.contains(Capability.quota) { login.quota = try? await login.client.quota(account: personal.id) }
+            await notifyNewMail(login)
+        }
+        updateDockBadge()
+        if listChanged { await loadList() }
+        if threadChanged, let threadId { await loadThread(threadId) }
+        reloads += 1
+    }
+
+    /// Whether the list has rows from this account.
+    private func listShows(_ login: Login, account: String) -> Bool {
+        guard let ref = selectedMailbox else { return false }
+        if searchingEverywhere { return true }
+        if ref == .allInboxes { return inboxes.contains { $0.login == login.id && $0.account == account } }
+        return ref.login == login.id && ref.account == account
+    }
+
+    /// Changed messages, applied to the rows they show in. False when the list has to be searched again instead
+    /// (a message came into a mailbox being shown, or the one a row shows left it).
+    private func patchRows(_ emails: [Email], login: Login, account: String) -> Bool {
+        let shown = (selectedMailbox == .allInboxes ? inboxes : [selectedMailbox].compactMap { $0 }).filter { $0.login == login.id && $0.account == account }
+        for email in emails {
+            if let i = conversations.firstIndex(where: { $0.email.id == email.id }) {
+                guard let place = place(of: conversations[i].id), email.mailboxIds[place.mailbox] == true else { return false }
+                conversations[i].email.keywords = email.keywords
+                conversations[i].email.mailboxIds = email.mailboxIds
+            } else if let row = conversations.first(where: { $0.id == email.threadId }) {
+                // A newer message of a conversation in the list, now in its mailbox, becomes the row.
+                guard let place = place(of: row.id) else { return false }
+                if email.mailboxIds[place.mailbox] == true, (email.receivedAt ?? .distantPast) > (row.email.receivedAt ?? .distantPast) { return false }
+            } else if shown.contains(where: { email.mailboxIds[$0.mailbox] == true }) {
+                return false
+            }
+        }
+        return true
+    }
+
     /// Show the selected mailbox from the top: what it showed last time, then what's on the server.
     func showMailbox() async {
         selectedThreads = openAfterLoad.map { [$0] } ?? []
@@ -458,7 +580,7 @@ final class MailStore {
         rowPlaces = [:]
         unreadOnly = false
         if let ref = selectedMailbox, ref != .allInboxes, let cached = login(ref.login)?.cache.list(account: ref.account, mailbox: ref.mailbox) {
-            conversations = cached.conversations
+            conversations = withQueued(cached.conversations, in: ref)
             total = cached.total
         }
         listEpoch += 1
@@ -519,7 +641,7 @@ final class MailStore {
                 login.problem = error.localizedDescription
                 // Offline: the list from last time.
                 if search.isEmpty, !unreadOnly, let cached = login.cache.list(account: place.account, mailbox: place.mailbox) {
-                    rows += cached.conversations.map { ($0, place) }
+                    rows += withQueued(cached.conversations, in: place).map { ($0, place) }
                     total += cached.total
                     loaded = true
                 }
@@ -683,6 +805,108 @@ final class MailStore {
         try await login.client.update(account: place.account, Dictionary(emails.map { ($0.id, patch($0)) }, uniquingKeysWith: { a, _ in a }))
     }
 
+    // MARK: Changes made offline
+
+    /// Changes made while the server couldn't be reached, oldest first; sent when it's back (also after quitting).
+    private(set) var queued: [QueuedChange] = QueuedChange.load()
+
+    static func isOffline(_ error: Error) -> Bool {
+        guard let error = error as? URLError else { return false }
+        return [.notConnectedToInternet, .networkConnectionLost, .cannotConnectToHost, .cannotFindHost, .dnsLookupFailed,
+                .timedOut, .internationalRoamingOff, .dataNotAllowed, .secureConnectionFailed].contains(error.code)
+    }
+
+    /// Make a change on the server now; offline, keep it to send later. Returns the messages it changed (nil when
+    /// it waits, or failed).
+    @discardableResult
+    private func apply(_ change: QueuedChange) async -> [Email]? {
+        do {
+            return try await perform(change)
+        } catch {
+            if Self.isOffline(error) {
+                enqueue(change)
+            } else {
+                alert = error.localizedDescription
+            }
+            return nil
+        }
+    }
+
+    private func enqueue(_ change: QueuedChange) {
+        queued.append(change)
+        QueuedChange.save(queued)
+    }
+
+    /// One change on the server, worked out from what's there now (so one made offline still does the right thing).
+    private func perform(_ change: QueuedChange) async throws -> [Email] {
+        let place = change.place
+        let ids = Set(change.threadIds)
+        let emails = try await targets(ids, in: place)
+        let newest = Dictionary(grouping: emails, by: \.threadId).values.compactMap { $0.max { ($0.receivedAt ?? .distantPast) < ($1.receivedAt ?? .distantPast) } }
+        switch change.kind {
+        case .move:
+            guard let role = change.role, let target = mailbox(role: role, in: place), target.id != place.mailbox else { return [] }
+            let folders = folders(in: place)
+            try await update(emails, in: place) { Patch.move($0, to: target.id, folders: folders) }
+        case .read:
+            // Marking unread marks the newest message, as Mail does; marking read covers the whole conversation.
+            let read = change.on ?? true
+            try await update(read ? emails.filter(\.isUnread) : newest, in: place) { _ in Patch.keyword("$seen", read) }
+        case .flag:
+            // Flagging flags the newest message; unflagging clears every flag in the conversation.
+            let flag = change.on ?? true
+            try await update(flag ? newest : emails.filter(\.isFlagged), in: place) { _ in Patch.keyword("$flagged", flag) }
+        case .label:
+            guard let label = change.label else { return [] }
+            try await update(emails, in: place) { _ in Patch.label(label, change.on ?? true) }
+        case .snooze:
+            guard let until = change.until, let snoozed = mailbox(role: "snoozed", in: place) else { return [] }
+            let folders = folders(in: place)
+            try await update(emails, in: place) { Patch.snooze($0, until: until, snoozedMailbox: snoozed.id, folders: folders) }
+        }
+        return emails
+    }
+
+    /// Send what was changed offline in one sign-in, in order, once it's connected again. A change the server refuses
+    /// (the mail was deleted meanwhile, say) is dropped and said under the sidebar.
+    private func sendQueued(_ login: Login) async {
+        var sent = false
+        for change in queued where change.place.login == login.id {
+            do {
+                _ = try await perform(change)
+            } catch {
+                if Self.isOffline(error) { break }
+                login.problem = "A change made offline couldn’t be saved: \(error.localizedDescription)"
+            }
+            queued.removeAll { $0.id == change.id }
+            sent = true
+        }
+        if sent { QueuedChange.save(queued) }
+    }
+
+    /// A list kept from last time, with the changes still waiting applied, so it shows what you did offline.
+    private func withQueued(_ list: [Conversation], in place: MailboxRef) -> [Conversation] {
+        var list = list
+        for change in queued where change.place.login == place.login && change.place.account == place.account {
+            let ids = Set(change.threadIds)
+            switch change.kind {
+            case .move, .snooze:
+                if change.place.mailbox == place.mailbox { list.removeAll { ids.contains($0.id) } }
+            case .label where change.on == false && change.label == place.mailbox:
+                list.removeAll { ids.contains($0.id) }
+            case .read, .flag:
+                let keyword = change.kind == .read ? "$seen" : "$flagged"
+                for i in list.indices where ids.contains(list[i].id) { list[i].email.keywords[keyword] = change.on == true ? true : nil }
+            default:
+                break
+            }
+        }
+        return list
+    }
+
+    /// How many changes are waiting for a sign-in's connection.
+    func queuedCount(_ login: Login) -> Int { queued.filter { $0.place.login == login.id }.count }
+
     func archive(_ ids: Set<String>, in place: MailboxRef? = nil) async {
         await move(ids, in: place, to: "archive", actionName: "Archive")
     }
@@ -738,15 +962,9 @@ final class MailStore {
         guard !moves.isEmpty else { return }
         removeFromList(Set(moves.flatMap { $0.ids }))
         var moved: [(emails: [Email], place: MailboxRef)] = []
-        do {
-            for move in moves {
-                let folders = folders(in: move.place)
-                let emails = try await targets(move.ids, in: move.place)
-                try await update(emails, in: move.place) { Patch.move($0, to: move.target, folders: folders) }
-                moved.append((emails, move.place))
-            }
-        } catch {
-            alert = error.localizedDescription
+        for move in moves {
+            // Offline, it waits to be sent (and can't be undone, as nothing has happened yet).
+            if let emails = await apply(QueuedChange(.move, in: move.place, ids: move.ids, role: role)) { moved.append((emails, move.place)) }
         }
         if !moved.isEmpty {
             let done = moved
@@ -792,15 +1010,8 @@ final class MailStore {
     func setRead(_ ids: Set<String>, _ read: Bool, in only: MailboxRef? = nil) async {
         updateRows(ids) { $0.keywords["$seen"] = read ? true : nil }
         let groups = only.map { [$0: ids] } ?? places(ids)
-        do {
-            for (place, ids) in groups {
-                let emails = try await targets(ids, in: place)
-                // Marking unread marks the newest message, as Mail does; marking read covers the whole conversation.
-                let chosen = read ? emails.filter(\.isUnread) : Dictionary(grouping: emails, by: \.threadId).values.compactMap { $0.max { ($0.receivedAt ?? .distantPast) < ($1.receivedAt ?? .distantPast) } }
-                try await update(chosen, in: place) { _ in Patch.keyword("$seen", read) }
-            }
-        } catch {
-            alert = error.localizedDescription
+        for (place, ids) in groups {
+            await apply(QueuedChange(.read, in: place, ids: ids, on: read))
         }
         await refresh(groups.keys)
     }
@@ -813,6 +1024,8 @@ final class MailStore {
         do {
             try await update(emails, in: place) { _ in Patch.keyword("$seen", true) }
         } catch {
+            // Offline: marked read once the connection is back.
+            if Self.isOffline(error) { enqueue(QueuedChange(.read, in: place, ids: Set(emails.map(\.threadId)), on: true)) }
             login(place.login)?.problem = error.localizedDescription
         }
     }
@@ -822,12 +1035,8 @@ final class MailStore {
         let flag = !rows.allSatisfy(\.email.isFlagged)
         updateRows(ids) { $0.keywords["$flagged"] = flag ? true : nil }
         let groups = places(ids)
-        do {
-            for (place, ids) in groups {
-                try await update(rows.filter { ids.contains($0.id) }.map(\.email), in: place) { _ in Patch.keyword("$flagged", flag) }
-            }
-        } catch {
-            alert = error.localizedDescription
+        for (place, ids) in groups {
+            await apply(QueuedChange(.flag, in: place, ids: ids, on: flag))
         }
         await refresh(groups.keys)
     }
@@ -848,14 +1057,8 @@ final class MailStore {
     func snooze(_ ids: Set<String>, until: Date) async {
         let groups = places(ids)
         removeFromList(ids)
-        do {
-            for (place, ids) in groups {
-                guard let snoozed = mailbox(role: "snoozed", in: place) else { continue }
-                let folders = folders(in: place)
-                try await update(targets(ids, in: place), in: place) { Patch.snooze($0, until: until, snoozedMailbox: snoozed.id, folders: folders) }
-            }
-        } catch {
-            alert = error.localizedDescription
+        for (place, ids) in groups where mailbox(role: "snoozed", in: place) != nil {
+            await apply(QueuedChange(.snooze, in: place, ids: ids, until: until))
         }
         await refresh(groups.keys)
     }
@@ -867,14 +1070,10 @@ final class MailStore {
 
     func setLabel(_ label: Mailbox, _ on: Bool, for ids: Set<String>) async {
         if !on && label.id == selectedMailbox?.mailbox { removeFromList(ids) }
+        // Labels belong to one account.
         let groups = places(ids).filter { labels(in: $0.key).contains(label) }
-        do {
-            // Labels belong to one account.
-            for (place, ids) in groups {
-                try await update(targets(ids, in: place), in: place) { _ in Patch.label(label.id, on) }
-            }
-        } catch {
-            alert = error.localizedDescription
+        for (place, ids) in groups {
+            await apply(QueuedChange(.label, in: place, ids: ids, on: on, label: label.id))
         }
         await refresh(groups.keys)
     }

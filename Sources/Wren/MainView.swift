@@ -142,6 +142,11 @@ struct Sidebar: View {
             let who = store.logins.count > 1 ? "\(login.username): " : ""
             var notes: [Note] = []
             if let problem = login.problem { notes.append(Note(text: who + problem, icon: "exclamationmark.triangle", help: problem)) }
+            let waiting = store.queuedCount(login)
+            if waiting > 0 {
+                notes.append(Note(text: who + (waiting == 1 ? "1 change" : "\(waiting) changes") + " waiting for the connection", icon: "arrow.triangle.2.circlepath",
+                                  help: "What you did offline is sent to Wren when it can be reached again."))
+            }
             if let quota = login.quota, quota.fraction >= 0.9 {
                 let full = quota.fraction.formatted(.percent.precision(.fractionLength(0)))
                 notes.append(Note(text: who + "Storage is \(full) full. Delete large messages to keep getting mail.", icon: "externaldrive.badge.exclamationmark", help: storageText(quota)))

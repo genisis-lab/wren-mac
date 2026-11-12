@@ -166,8 +166,9 @@ public actor JMAPClient {
 
     #if canImport(Darwin)
     /// Listen to the push stream and call `onChange` whenever something changes on the server
-    /// (once right away, too). Returns when the server ends the stream, which Wren does every 15 minutes.
-    public func listen(onChange: @escaping @Sendable () async -> Void) async throws {
+    /// (once right away, too) with each changed account's new state. Returns when the server ends the stream,
+    /// which Wren does every 15 minutes.
+    public func listen(onChange: @escaping @Sendable (_ changed: [String: String]) async -> Void) async throws {
         let session = try await currentSession()
         guard let template = session.eventSourceUrl, let url = URL(string: expand(template, ["types": "*", "closeafter": "no", "ping": "60"])) else { return }
         var request = URLRequest(url: url)
@@ -180,8 +181,19 @@ public actor JMAPClient {
         var event = ""
         for try await line in bytes.lines {
             if line.hasPrefix("event:") { event = line.dropFirst(6).trimmingCharacters(in: .whitespaces) }
-            else if line.hasPrefix("data:"), event == "state" { await onChange() }
+            else if line.hasPrefix("data:"), event == "state" { await onChange(Self.changedStates(String(line.dropFirst(5)))) }
         }
     }
     #endif
+
+    /// A StateChange's accounts and their new states (RFC 8620 7.1). Wren has one state per account for every type;
+    /// for other servers the Email state stands for the account.
+    public static func changedStates(_ data: String) -> [String: String] {
+        guard let json = try? JSONDecoder().decode(JSON.self, from: Data(data.utf8)), let changed = json["changed"]?.object else { return [:] }
+        var out: [String: String] = [:]
+        for (account, types) in changed {
+            if let state = types["Email"]?.string ?? types["Thread"]?.string ?? types["Mailbox"]?.string { out[account] = state }
+        }
+        return out
+    }
 }

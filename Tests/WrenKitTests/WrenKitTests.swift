@@ -405,6 +405,51 @@ final class WrenKitTests: XCTestCase {
         ])
     }
 
+    func testOnlyWhatChangedIsFetched() async throws {
+        XCTAssertEqual(
+            JMAPClient.changedStates(#"{"@type":"StateChange","changed":{"u1":{"Email":"7","Mailbox":"7"},"s9":{"Mailbox":"3"}}}"#),
+            ["u1": "7", "s9": "3"]
+        )
+        XCTAssertEqual(JMAPClient.changedStates("not json"), [:])
+        let client = JMAPClient(server: URL(string: "https://mail.test")!, username: "ada@wren.test", password: "wren_app", http: Mock.session)
+        Mock.handler = { request in
+            if request.url?.path == "/jmap/session" {
+                return [
+                    "apiUrl": "https://mail.test/jmap/api", "downloadUrl": "", "uploadUrl": "", "username": "ada@wren.test",
+                    "capabilities": [Capability.core: [:], Capability.mail: [:]],
+                    "accounts": ["u1": ["name": "ada@wren.test", "isPersonal": true, "accountCapabilities": [Capability.mail: [:]]]],
+                ]
+            }
+            let body = try JSONDecoder().decode(JSON.self, from: Mock.body(of: request))
+            let call = body["methodCalls"]?.array?.first?.array ?? []
+            let args = call[1]
+            if call[0] == "Email/get" {
+                XCTAssertEqual(args["ids"], ["M2"])
+                return ["methodResponses": [["Email/get", ["list": [["id": "M2", "threadId": "T2", "mailboxIds": ["inbox": true], "keywords": ["$seen": true]]]], "0"]]]
+            }
+            // Two pages: M1 made then changed, M3 changed then deleted.
+            if args["sinceState"] == "5" {
+                return ["methodResponses": [["Email/changes", ["oldState": "5", "newState": "6", "hasMoreChanges": true, "created": ["M1"], "updated": ["M2", "M3"], "destroyed": []], "0"]]]
+            }
+            if args["sinceState"] == "6" {
+                return ["methodResponses": [["Email/changes", ["oldState": "6", "newState": "8", "hasMoreChanges": false, "created": [], "updated": ["M1", "M2"], "destroyed": ["M3"]], "0"]]]
+            }
+            return ["methodResponses": [["error", ["type": "cannotCalculateChanges"], "0"]]]
+        }
+        let changes = try await client.emailChanges(account: "u1", since: "5")
+        XCTAssertEqual(changes, EmailChanges(created: ["M1"], updated: ["M2"], destroyed: ["M3"], newState: "8"))
+        do {
+            _ = try await client.emailChanges(account: "u1", since: "1")
+            XCTFail("An old state can't be followed")
+        } catch JMAPError.method(let type, _) {
+            XCTAssertEqual(type, "cannotCalculateChanges")
+        }
+        let emails = try await client.emails(["M2"], account: "u1")
+        XCTAssertEqual(emails.first?.isUnread, false)
+        let none = try await client.emails([], account: "u1")
+        XCTAssertTrue(none.isEmpty)
+    }
+
     func testLabelsAreMadeRenamedAndDeleted() async throws {
         let client = JMAPClient(server: URL(string: "https://mail.test")!, username: "ada@wren.test", password: "wren_app", http: Mock.session)
         nonisolated(unsafe) var seen: [JSON] = []
