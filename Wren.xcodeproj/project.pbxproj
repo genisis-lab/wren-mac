@@ -320,7 +320,6 @@
 				};
 			};
 			buildConfigurationList = 797F8532C4299549522E50B0 /* Build configuration list for PBXProject "Wren" */;
-			compatibilityVersion = "Xcode 14.0";
 			developmentRegion = en;
 			hasScannedForEncodings = 0;
 			knownRegions = (
@@ -334,12 +333,13 @@
 				C242ACEB4BC744F5677E3821 /* XCLocalSwiftPackageReference "." */,
 			);
 			preferredProjectObjectVersion = 77;
+			productRefGroup = 6E6B530D709AD1D42E0FB791 /* Products */;
 			projectDirPath = "";
 			projectRoot = "";
 			targets = (
 				F7E372FDBBEC3D562BD8C06D /* Wren */,
-				E9F5AC3E1D236C14E9A09F58 /* WrenShare */,
 				653B0294A9E1BDC8FDFF18B1 /* WrenWidget */,
+				E9F5AC3E1D236C14E9A09F58 /* WrenShare */,
 			);
 		};
 /* End PBXProject section */
