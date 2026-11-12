@@ -32,6 +32,8 @@ struct ComposeView: View {
     /// With Encrypt on: who has no PGP key Wren knows.
     @State private var missingKeys: [String] = []
     @State private var confirmingPlain = false
+    /// The background saves to Drafts (sending and closing wait for one under way, so the two don't both make a draft).
+    @State private var copy = DraftCopy()
 
     enum Field: Hashable { case to, cc, bcc, subject }
 
@@ -190,6 +192,21 @@ struct ComposeView: View {
         }
         // Kept for restoring the window after Wren quits, which writes it to disk: never an Encrypt-on draft's plain text.
         .onChange(of: draft) { value = draft.encrypt == true ? nil : draft }
+        // Another From address brings its own signature.
+        .onChange(of: draft.identityId) { old, new in
+            guard let old, let new, old != new else { return }
+            let list = identities
+            let before = Draft.signatureInner(list.first { $0.id == old })
+            let after = Draft.signatureInner(list.first { $0.id == new })
+            if before != after { editor.setSignature(after) }
+        }
+        .task {
+            // Saved to Drafts every 30 seconds while there are changes, so a crash or a forced quit loses little.
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(30))
+                if !Task.isCancelled { await autosave() }
+            }
+        }
         .onDisappear { saveOnClose() }
     }
 
@@ -441,6 +458,7 @@ struct ComposeView: View {
         busy = true
         error = nil
         Task {
+            while copy.saving { try? await Task.sleep(for: .milliseconds(50)) }
             do {
                 // With Encrypt or Sign on, what's saved and sent is the PGP text; nil if the passphrase was cancelled.
                 guard var outgoing = try await store.sealed(draft, forSending: true) else {
@@ -469,11 +487,36 @@ struct ComposeView: View {
         dismiss()
     }
 
+    private static func isBlank(_ d: Draft) -> Bool {
+        [d.to, d.cc, d.bcc, d.subject, d.body].allSatisfy { $0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty } && d.files.isEmpty
+    }
+
+    /// Changes so far into Drafts, replacing the last copy. Not with Encrypt or Sign on: sealing can ask for the
+    /// passphrase, which shouldn't pop up while you type; those are saved when the window closes.
+    private func autosave() async {
+        let d = draft
+        guard !done, !busy, !copy.saving, uploading == 0, !usesPGP, d != saved, !Self.isBlank(d) else { return }
+        copy.saving = true
+        defer { copy.saving = false }
+        guard let id = try? await store.save(d) else { return }
+        copy.id = id
+        guard !done else { return }
+        // The next save replaces this one. What's typed meanwhile stays a change, for the next round.
+        var kept = d
+        kept.replaces = id
+        saved = kept
+        draft.replaces = id
+    }
+
     private func saveOnClose() {
         let d = draft
-        let empty = [d.to, d.cc, d.bcc, d.subject, d.body].allSatisfy { $0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty } && d.files.isEmpty
-        guard !done, d != saved, !empty else { return }
+        guard !done, d != saved, !Self.isBlank(d) else { return }
+        let copy = copy
         Task {
+            // A save still under way made a newer copy; this one replaces that.
+            while copy.saving { try? await Task.sleep(for: .milliseconds(50)) }
+            var d = d
+            if let id = copy.id { d.replaces = id }
             do {
                 // With Encrypt on, a draft is kept encrypted for you, never as plain text.
                 guard let toSave = try await store.sealed(d, forSending: false) else { return }
@@ -483,6 +526,14 @@ struct ComposeView: View {
             }
         }
     }
+}
+
+/// The newest copy of a message in Drafts, from saving in the background. A class, so a save that finishes after
+/// the window has closed is still seen by the save on closing.
+@MainActor
+final class DraftCopy {
+    var id: String?
+    var saving = false
 }
 
 struct ScheduleSheet: View {

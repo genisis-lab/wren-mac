@@ -67,7 +67,7 @@ final class WrenKitTests: XCTestCase {
         XCTAssertTrue(d.body.hasPrefix("\n\nAda\nWren\n\n"), d.body)
         XCTAssertTrue(d.body.hasSuffix("Grace wrote:\n\n> Noon?\n>> earlier"), d.body)
         // The editor gets the quote as HTML: the original's text, escaped, in a blockquote.
-        XCTAssertTrue(d.html?.hasPrefix("<br><br>Ada<br>Wren<br><br><div class=\"wren-quote\"><div>") == true, d.html ?? "")
+        XCTAssertTrue(d.html?.hasPrefix("<br><br><div class=\"wren-signature\">Ada<br>Wren</div><br><br><div class=\"wren-quote\"><div>") == true, d.html ?? "")
         XCTAssertTrue(d.html?.contains("<pre style=\"white-space:pre-wrap;font-family:inherit\">Noon?\n&gt; earlier</pre></blockquote>") == true, d.html ?? "")
         var rich = email
         rich.htmlBody = [BodyPart(partId: "h", size: 1, type: "text/html")]
@@ -281,6 +281,18 @@ final class WrenKitTests: XCTestCase {
         XCTAssertEqual(clean("mailto:ada@example.com?subject=utm_x"), "mailto:ada@example.com?subject=utm_x")
     }
 
+    func testSignaturesKeepTheirFormatting() {
+        let rich = Identity(id: "I1", name: "Ada", email: "ada@wren.test", textSignature: "Ada Wren", htmlSignature: "<b>Ada</b> <a href=\"https://wren.test\">Wren</a>")
+        let d = Draft.new(account: "u1", identity: rich)
+        XCTAssertEqual(d.html, "<br><br><div class=\"wren-signature\"><b>Ada</b> <a href=\"https://wren.test\">Wren</a></div>")
+        XCTAssertEqual(d.body, "\n\nAda Wren")
+        // No HTML one: the plain one, escaped; none at all: nothing, and no HTML part.
+        let plain = Identity(id: "I2", name: "Ada", email: "ada@wren.test", textSignature: "A <b>")
+        XCTAssertEqual(Draft.signatureInner(plain), "A &lt;b&gt;")
+        XCTAssertNil(Draft.new(account: "u1", identity: Identity(id: "I3", name: "", email: "x@wren.test")).html)
+        XCTAssertEqual(Draft.signatureInner(Identity(id: "I4", name: "", email: "x@wren.test", textSignature: "", htmlSignature: "<p><br></p>")), "")
+    }
+
     func testMailtoLinksBecomeDrafts() {
         let me = Identity(id: "I1", name: "Ada", email: "ada@wren.test", textSignature: "Ada")
         let d = Draft.mailto(URL(string: "mailto:grace@example.com,bob@example.com?cc=carol@example.com&subject=Lunch%20on%20Friday%3F&body=Hi%20Grace%2C%0D%0ANoon%3F&attach=/etc/passwd&to=dan@example.com")!, account: "u1", identity: me)
@@ -288,6 +300,7 @@ final class WrenKitTests: XCTestCase {
         XCTAssertEqual(d.cc, "carol@example.com")
         XCTAssertEqual(d.subject, "Lunch on Friday?")
         XCTAssertEqual(d.body, "Hi Grace,\nNoon?\n\nAda")
+        XCTAssertEqual(d.html, "Hi Grace,<br>Noon?<br><br><div class=\"wren-signature\">Ada</div>")
         XCTAssertTrue(d.files.isEmpty)
         XCTAssertEqual(Draft.mailto(URL(string: "MAILTO:?subject=Hi")!, account: "u1", identity: nil).to, "")
     }

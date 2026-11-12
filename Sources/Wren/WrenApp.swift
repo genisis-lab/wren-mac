@@ -138,6 +138,14 @@ struct MailCommands: Commands {
             Button("Archive") { act { await $0.archive($1) } }
                 .keyboardShortcut("a", modifiers: [.command, .control])
                 .disabled(selection.isEmpty || ["archive", "drafts", "sent"].contains(store.currentRole ?? ""))
+            Button("Move to Inbox") { act { await $0.moveToInbox($1) } }
+                .disabled(selection.isEmpty || !store.canMoveToInbox)
+            Menu("Move to") {
+                ForEach(store.moveTargets, id: \.self) { target in
+                    Button(MailStore.folderName(target)) { act { await $0.move($1, toFolder: target) } }
+                }
+            }
+            .disabled(selection.isEmpty || store.moveTargets.isEmpty)
             Button(store.currentRole == "trash" ? "Delete Forever…" : "Move to Trash") { act { await $0.trash($1) } }
                 .keyboardShortcut(.delete, modifiers: .command)
                 .disabled(selection.isEmpty)

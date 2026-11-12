@@ -36,9 +36,16 @@ struct ReaderPane: View {
         let role = store.currentRole ?? ""
         let none = store.selectedThreads.isEmpty
         ToolbarItemGroup {
-            Button { act { await $0.archive($1) } } label: { Label("Archive", systemImage: "archivebox") }
-                .help("Archive")
-                .disabled(none || ["archive", "drafts", "sent"].contains(role))
+            // In Archive, Trash and Snoozed the first button takes mail back to the Inbox instead.
+            if store.canMoveToInbox {
+                Button { act { await $0.moveToInbox($1) } } label: { Label("Move to Inbox", systemImage: "tray.and.arrow.down") }
+                    .help("Move to Inbox")
+                    .disabled(none)
+            } else {
+                Button { act { await $0.archive($1) } } label: { Label("Archive", systemImage: "archivebox") }
+                    .help("Archive")
+                    .disabled(none || ["drafts", "sent"].contains(role))
+            }
             Button { act { await $0.trash($1) } } label: { Label(role == "trash" ? "Delete Forever" : "Trash", systemImage: "trash") }
                 .help(role == "trash" ? "Delete Forever" : "Move to Trash")
                 .disabled(none)

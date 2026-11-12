@@ -104,6 +104,8 @@ public struct Identity: Codable, Hashable, Sendable, Identifiable {
     public var name: String
     public var email: String
     public var textSignature: String?
+    /// The signature as set in Wren on the web, with its formatting and links (Wren keeps it as HTML).
+    public var htmlSignature: String? = nil
 
     public var address: EmailAddress { EmailAddress(name: name, email: email) }
 }

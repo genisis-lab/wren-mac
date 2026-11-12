@@ -38,19 +38,15 @@ struct ConversationList: View {
                     }
             }
             if store.conversations.count < store.total {
-                ProgressView()
-                    .controlSize(.small)
-                    .frame(maxWidth: .infinity)
-                    .onAppear { Task { await store.loadMore() } }
+                LoadMoreRow()
             }
         }
         .contextMenu(forSelectionType: String.self) { ids in
             MessageActions(ids: ids)
         } primaryAction: { ids in
             // Double-clicking a draft opens it to keep writing, as in Mail.
-            if ids.count == 1, let draft = store.thread.last(where: { $0.isDraft && ids.contains($0.threadId) }), let d = store.editDraft(draft) {
-                openWindow(id: "compose", value: d)
-            }
+            guard ids.count == 1, let id = ids.first, store.currentRole == "drafts" else { return }
+            Task { if let d = await store.draftToEdit(inThread: id) { openWindow(id: "compose", value: d) } }
         }
         .onDeleteCommand {
             let ids = store.selectedThreads
@@ -103,6 +99,30 @@ struct ConversationList: View {
         if store.unreadOnly { return store.total == 1 ? "1 unread conversation" : "\(store.total.formatted()) unread conversations" }
         let all = store.total == 1 ? "1 conversation" : "\(store.total.formatted()) conversations"
         return unread > 0 && store.currentRole != "drafts" ? "\(all), \(unread.formatted()) unread" : all
+    }
+}
+
+/// The end of the list: loads the next page when it scrolls into view, or offers to try again when that failed.
+struct LoadMoreRow: View {
+    @Environment(MailStore.self) private var store
+    @State private var failed = false
+
+    var body: some View {
+        Group {
+            if failed {
+                Button("Load More") { load() }
+                    .buttonStyle(.link)
+            } else {
+                ProgressView().controlSize(.small)
+            }
+        }
+        .frame(maxWidth: .infinity)
+        .onAppear { load() }
+    }
+
+    private func load() {
+        failed = false
+        Task { failed = !(await store.loadMore()) }
     }
 }
 
@@ -212,7 +232,7 @@ struct MessageActions: View {
         Button(anyUnread ? "Mark as Read" : "Mark as Unread") { Task { await store.setRead(ids, anyUnread) } }
         Button(rows.allSatisfy(\.email.isFlagged) ? "Unflag" : "Flag") { Task { await store.toggleFlag(ids) } }
         Divider()
-        if role == "snoozed" {
+        if store.canMoveToInbox {
             Button("Move to Inbox") { Task { await store.moveToInbox(ids) } }
         }
         if !["archive", "drafts", "sent"].contains(role) {
@@ -221,6 +241,13 @@ struct MessageActions: View {
         Button(role == "trash" ? "Delete Forever…" : "Move to Trash") { Task { await store.trash(ids) } }
         if !["drafts", "sent"].contains(role) {
             Button(role == "junk" ? "Not Junk" : "Move to Junk") { Task { await store.junk(ids) } }
+        }
+        if !store.moveTargets.isEmpty {
+            Menu("Move to") {
+                ForEach(store.moveTargets, id: \.self) { target in
+                    Button(MailStore.folderName(target)) { Task { await store.move(ids, toFolder: target) } }
+                }
+            }
         }
         if store.canSnooze {
             Menu("Snooze") {
