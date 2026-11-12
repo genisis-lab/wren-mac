@@ -1,4 +1,5 @@
 import AppKit
+import Network
 import Observation
 import SwiftUI
 import UniformTypeIdentifiers
@@ -7,7 +8,7 @@ import WidgetKit
 import WrenKit
 
 /// A mailbox: which sign-in, which account in it (your own, or a shared mailbox), and which mailbox.
-struct MailboxRef: Hashable {
+struct MailboxRef: Hashable, Codable {
     var login: String
     var account: String
     var mailbox: String
@@ -38,6 +39,9 @@ final class Login: Identifiable {
     @ObservationIgnored var listening: Task<Void, Never>?
     /// Inbox messages already notified about (nil until the first look, so mail that was already there isn't announced).
     @ObservationIgnored var announced: Set<String>?
+    /// Each account's state as last brought up to date from the push stream, and newer ones it has said since.
+    @ObservationIgnored var states: [String: String] = [:]
+    @ObservationIgnored var pushedStates: [String: String] = [:]
 
     init(_ client: JMAPClient) {
         let key = Login.key(server: client.server, username: client.username)
@@ -65,6 +69,39 @@ final class Login: Identifiable {
     }
 }
 
+/// A conversation in a window of its own: where it is, and which.
+struct OpenConversation: Codable, Hashable {
+    var place: MailboxRef
+    var threadId: String
+}
+
+extension EnvironmentValues {
+    /// Where the conversation being shown is, in a conversation window; nil in the main window's reader.
+    @Entry var conversationPlace: MailboxRef? = nil
+}
+
+/// A label being named in the label sheet.
+struct LabelEdit: Identifiable {
+    var login: String
+    var account: String
+    /// The label being renamed; nil for a new one.
+    var label: String?
+    var name = ""
+    /// Conversations to give the new label once it's made.
+    var labelling: Set<String> = []
+    var id: String { "\(login) \(account) \(label ?? "new")" }
+}
+
+/// A message held for a few seconds after Send, so it can still be stopped.
+struct PendingSend: Equatable {
+    var submission: String
+    var login: String
+    var account: String
+    /// The message as it was written, to open again.
+    var draft: Draft
+    var until: Date
+}
+
 /// Everything the windows show, and every change they make, for every sign-in.
 @MainActor
 @Observable
@@ -83,6 +120,13 @@ final class MailStore {
     var selectedMailbox: MailboxRef?
     var selectedThreads: Set<String> = []
     var search = ""
+    /// Where a search looks: the mailbox being shown, or all mail in every account (but Trash and Junk).
+    var searchScope = SearchScope.mailbox
+
+    enum SearchScope: Hashable { case mailbox, everywhere }
+
+    /// A search of all mail is showing, so each row may be from a different mailbox.
+    var searchingEverywhere: Bool { searchScope == .everywhere && !search.trimmingCharacters(in: .whitespaces).isEmpty }
     /// Only conversations with unread mail (until another mailbox is chosen).
     private(set) var unreadOnly = false
     /// Goes up when the list starts over with other rows. The list is made afresh then: changing a table row by row
@@ -108,6 +152,14 @@ final class MailStore {
     var confirmingDelete: Set<String>?
     /// The Trash or Junk mailbox waiting for "Empty" to be confirmed.
     var confirmingEmpty: MailboxRef?
+    /// The label being named: a new one in an account, or one being renamed.
+    var labelEditor: LabelEdit?
+    /// A label waiting for "Delete" to be confirmed.
+    var confirmingDeleteLabel: MailboxRef?
+    /// A message just sent and still held for Undo Send.
+    private(set) var pendingSend: PendingSend?
+    /// The Scheduled Messages sheet is open.
+    var showingScheduled = false
 
     @ObservationIgnored var undoManager: UndoManager?
     /// For windows opened from outside a window: mailto: links and notifications. Set by the main window.
@@ -124,6 +176,29 @@ final class MailStore {
     @ObservationIgnored private var listGeneration = 0
     /// Where each row of the list lives (in All Inboxes, each comes from its own sign-in's Inbox).
     @ObservationIgnored private var rowPlaces: [String: MailboxRef] = [:]
+    /// The reload running now; asks for another while it runs wait for it, then share one more.
+    @ObservationIgnored private var reloading: Task<Void, Never>?
+    @ObservationIgnored private var reloadAll = false
+    @ObservationIgnored private var reloadLogins: Set<String> = []
+    /// Sign-ins whose push said what changed, to bring up to date with only that (see `sync`).
+    @ObservationIgnored private var syncLogins: Set<String> = []
+    @ObservationIgnored private var reloadsAsked = 0
+    @ObservationIgnored private var reloadsDone = 0
+    /// Watches for the network coming back, to reconnect at once rather than when the old connection times out.
+    @ObservationIgnored private let network = NWPathMonitor()
+    @ObservationIgnored private var online: Bool?
+    @ObservationIgnored private var lastReconnect = Date.distantPast
+
+    init() {
+        network.pathUpdateHandler = { [weak self] path in
+            let up = path.status == .satisfied
+            Task { @MainActor in self?.networkChanged(up) }
+        }
+        network.start(queue: .main)
+        NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.didWakeNotification, object: nil, queue: .main) { [weak self] _ in
+            Task { @MainActor in self?.reconnect() }
+        }
+    }
 
     // MARK: Mailboxes
 
@@ -162,7 +237,7 @@ final class MailStore {
 
     /// Where a conversation in the list lives: the mailbox being shown, or in All Inboxes, its own Inbox.
     func place(of threadId: String) -> MailboxRef? {
-        selectedMailbox == .allInboxes ? rowPlaces[threadId] : selectedMailbox
+        selectedMailbox == .allInboxes || searchingEverywhere ? rowPlaces[threadId] : selectedMailbox
     }
 
     private func places(_ ids: Set<String>) -> [MailboxRef: Set<String>] {
@@ -239,6 +314,8 @@ final class MailStore {
         decrypted = [:]
         login.cache.delete()
         Spotlight.forget(login: login.id)
+        queued.removeAll { $0.place.login == login.id }
+        QueuedChange.save(queued)
         logins.removeAll { $0 === login }
         save()
         undoManager?.removeAllActions()
@@ -278,10 +355,11 @@ final class MailStore {
                 let session = try await login.client.connect()
                 login.accounts = session.mailAccounts
                 for account in login.accounts { login.identities[account.id] = try await login.client.identities(account: account.id) }
+                await sendQueued(login)
                 openPending()
                 delay = 2
                 // Wren sends the current state as soon as the stream opens, so this also loads everything.
-                try await login.client.listen { [weak self] in await self?.refresh(login) }
+                try await login.client.listen { [weak self] changed in await self?.pushed(changed, to: login) }
             } catch JMAPError.unauthorized(_) {
                 remove(login, message: "Wren didn’t accept the app password for \(login.username). If it was revoked, create a new one in Wren and sign in again.")
                 return
@@ -294,11 +372,86 @@ final class MailStore {
         }
     }
 
+    private func networkChanged(_ up: Bool) {
+        defer { online = up }
+        // The first report is how things are at launch, not a change.
+        if up, online == false { reconnect() }
+    }
+
+    /// Start every sign-in's connection over: after the Mac wakes or the network comes back, the old one is
+    /// usually dead but would only time out minutes later, and a retry may be waiting up to a minute.
+    func reconnect() {
+        // Waking up often brings the network back too; once is enough.
+        guard Date.now.timeIntervalSince(lastReconnect) > 5 else { return }
+        lastReconnect = .now
+        for login in logins {
+            login.listening?.cancel()
+            login.listening = Task { [weak self] in await self?.listen(login) }
+        }
+    }
+
     // MARK: Loading
 
     /// Load again: the mailboxes of one sign-in (or all), and the list and conversation when they show its mail.
+    /// One reload runs at a time; asks that come in while it runs (an action, and the push that follows it) share
+    /// the next one. Returns once a reload that started after the ask has finished.
     func refresh(_ only: Login? = nil) async {
-        for login in only.map({ [$0] }) ?? logins {
+        await refresh(logins: only.map { [$0.id] })
+    }
+
+    /// The sign-ins holding these places (each action reloads only the sign-ins it changed).
+    private func refresh(_ places: some Sequence<MailboxRef>) async {
+        await refresh(logins: Set(places.map(\.login)))
+    }
+
+    private func refresh(logins ids: Set<String>?, syncing: Set<String> = []) async {
+        if !syncing.isEmpty {
+            syncLogins.formUnion(syncing)
+        } else if let ids {
+            reloadLogins.formUnion(ids)
+        } else {
+            reloadAll = true
+        }
+        reloadsAsked += 1
+        let asked = reloadsAsked
+        while reloadsDone < asked {
+            if let running = reloading {
+                await running.value
+                continue
+            }
+            let all = reloadAll
+            let only = reloadLogins
+            let sync = syncLogins
+            let upTo = reloadsAsked
+            reloadAll = false
+            reloadLogins = []
+            syncLogins = []
+            // Bookkeeping happens inside the task, so whoever wakes first after it sees it finished.
+            let task = Task { [self] in
+                if all || !only.isEmpty { await reload(all ? nil : logins.filter { only.contains($0.id) }) }
+                for login in logins where sync.contains(login.id) {
+                    // Just loaded in full: what the push said is already showing.
+                    if all || only.contains(login.id) {
+                        login.states.merge(login.pushedStates) { $1 }
+                        login.pushedStates = [:]
+                    } else {
+                        await self.sync(login)
+                    }
+                }
+                reloadsDone = upTo
+                reloading = nil
+            }
+            reloading = task
+            await task.value
+        }
+    }
+
+    /// Goes up after each reload, so a conversation in a window of its own loads again too.
+    private(set) var reloads = 0
+
+    private func reload(_ only: [Login]?) async {
+        defer { reloads += 1 }
+        for login in only ?? logins {
             do {
                 for account in login.accounts { login.mailboxes[account.id] = try await login.client.mailboxes(account: account.id) }
                 if let personal = login.personal, personal.capabilities.contains(Capability.quota) { login.quota = try await login.client.quota(account: personal.id) }
@@ -310,13 +463,111 @@ final class MailStore {
             await notifyNewMail(login)
         }
         updateDockBadge()
+        let touched = only.map { Set($0.map(\.id)) }
         if let ref = selectedMailbox, ref != .allInboxes, login(ref.login)?.mailboxes[ref.account] != nil, mailbox(ref) == nil { selectedMailbox = nil }
         if selectedMailbox == nil {
             showFirstMailbox()
-        } else if only == nil || selectedMailbox == .allInboxes || selectedMailbox?.login == only?.id {
+        } else if touched == nil || selectedMailbox == .allInboxes || touched?.contains(selectedMailbox?.login ?? "") == true {
             await loadList()
         }
-        if let threadId, only == nil || threadPlace?.login == only?.id { await loadThread(threadId) }
+        if let threadId, touched == nil || touched?.contains(threadPlace?.login ?? "") == true { await loadThread(threadId) }
+    }
+
+    // MARK: Keeping up with the server
+
+    /// The push stream said these accounts changed. The first time (nothing to compare with) everything loads;
+    /// after that only what changed does (`sync`).
+    private func pushed(_ changed: [String: String], to login: Login) async {
+        let fresh = changed.filter { account, state in login.states[account] != state && login.accounts.contains { $0.id == account } }
+        if changed.isEmpty || login.states.isEmpty {
+            // A server that doesn't say, or the first word since connecting: load it all.
+            login.states.merge(changed) { $1 }
+            return await refresh(login)
+        }
+        guard !fresh.isEmpty else { return }
+        login.pushedStates.merge(fresh) { $1 }
+        await refresh(logins: nil, syncing: [login.id])
+    }
+
+    /// Bring a sign-in up to date with only what changed since the last push: each changed account's mailbox counts,
+    /// the list's rows patched in place when only flags or read state changed (searched again when mail came, went or
+    /// moved), and the open conversation only when its own messages changed. Falls back to loading it all.
+    private func sync(_ login: Login) async {
+        let pushed = login.pushedStates
+        login.pushedStates = [:]
+        var listChanged = false, threadChanged = false, arrived = false
+        do {
+            for (account, newState) in pushed {
+                guard let old = login.states[account] else { throw JMAPError.method("cannotCalculateChanges", nil) }
+                let changes = try await login.client.emailChanges(account: account, since: old)
+                login.mailboxes[account] = try await login.client.mailboxes(account: account)
+                login.states[account] = changes.newState == old ? newState : changes.newState
+                guard !changes.isEmpty else { continue }
+                if !changes.created.isEmpty { arrived = true }
+                let shown = listShows(login, account: account)
+                let open = threadPlace.map { $0.login == login.id && $0.account == account } ?? false
+                guard shown || open else { continue }
+                let fetched = try await login.client.emails(changes.created + changes.updated, account: account)
+                if shown {
+                    if !changes.created.isEmpty || !changes.destroyed.isEmpty || searchingEverywhere {
+                        listChanged = true
+                    } else if !patchRows(fetched.filter { changes.updated.contains($0.id) }, login: login, account: account) {
+                        listChanged = true
+                    }
+                }
+                if open, let threadId {
+                    let mine = Set(thread.map(\.id))
+                    if fetched.contains(where: { $0.threadId == threadId }) || changes.destroyed.contains(where: mine.contains) { threadChanged = true }
+                }
+            }
+        } catch {
+            if Self.isOffline(error) {
+                login.problem = error.localizedDescription
+                return
+            }
+            // Too old to follow, or the server doesn't keep changes: load it all, from the newest state.
+            login.states.merge(pushed) { $1 }
+            await reload([login])
+            return
+        }
+        login.cache.state = .init(accounts: login.accounts, mailboxes: login.mailboxes, identities: login.identities)
+        login.problem = nil
+        if arrived {
+            if let personal = login.personal, personal.capabilities.contains(Capability.quota) { login.quota = try? await login.client.quota(account: personal.id) }
+            await notifyNewMail(login)
+        }
+        updateDockBadge()
+        if listChanged { await loadList() }
+        if threadChanged, let threadId { await loadThread(threadId) }
+        reloads += 1
+    }
+
+    /// Whether the list has rows from this account.
+    private func listShows(_ login: Login, account: String) -> Bool {
+        guard let ref = selectedMailbox else { return false }
+        if searchingEverywhere { return true }
+        if ref == .allInboxes { return inboxes.contains { $0.login == login.id && $0.account == account } }
+        return ref.login == login.id && ref.account == account
+    }
+
+    /// Changed messages, applied to the rows they show in. False when the list has to be searched again instead
+    /// (a message came into a mailbox being shown, or the one a row shows left it).
+    private func patchRows(_ emails: [Email], login: Login, account: String) -> Bool {
+        let shown = (selectedMailbox == .allInboxes ? inboxes : [selectedMailbox].compactMap { $0 }).filter { $0.login == login.id && $0.account == account }
+        for email in emails {
+            if let i = conversations.firstIndex(where: { $0.email.id == email.id }) {
+                guard let place = place(of: conversations[i].id), email.mailboxIds[place.mailbox] == true else { return false }
+                conversations[i].email.keywords = email.keywords
+                conversations[i].email.mailboxIds = email.mailboxIds
+            } else if let row = conversations.first(where: { $0.id == email.threadId }) {
+                // A newer message of a conversation in the list, now in its mailbox, becomes the row.
+                guard let place = place(of: row.id) else { return false }
+                if email.mailboxIds[place.mailbox] == true, (email.receivedAt ?? .distantPast) > (row.email.receivedAt ?? .distantPast) { return false }
+            } else if shown.contains(where: { email.mailboxIds[$0.mailbox] == true }) {
+                return false
+            }
+        }
+        return true
     }
 
     /// Show the selected mailbox from the top: what it showed last time, then what's on the server.
@@ -329,7 +580,7 @@ final class MailStore {
         rowPlaces = [:]
         unreadOnly = false
         if let ref = selectedMailbox, ref != .allInboxes, let cached = login(ref.login)?.cache.list(account: ref.account, mailbox: ref.mailbox) {
-            conversations = cached.conversations
+            conversations = withQueued(cached.conversations, in: ref)
             total = cached.total
         }
         listEpoch += 1
@@ -353,7 +604,29 @@ final class MailStore {
         var rows: [(conversation: Conversation, place: MailboxRef)] = []
         var total = 0
         var loaded = false
-        for place in ref == .allInboxes ? inboxes : [ref] {
+        let everywhere = searchingEverywhere
+        if everywhere {
+            // Every account of every sign-in; each row lives in the folder its message is in.
+            for login in logins {
+                for account in login.accounts {
+                    let boxes = login.mailboxes[account.id] ?? []
+                    let skip = boxes.filter { ["trash", "junk"].contains($0.role ?? "") }.map(\.id)
+                    let folders = boxes.filter { $0.role != nil }
+                    do {
+                        let page = try await login.client.conversations(account: account.id, mailbox: nil, excluding: skip, search: search, unreadOnly: unreadOnly, limit: limit)
+                        for c in page.list {
+                            let folder = folders.first { c.email.mailboxIds[$0.id] == true } ?? folders.first { $0.role == "inbox" }
+                            rows.append((c, MailboxRef(login: login.id, account: account.id, mailbox: folder?.id ?? "")))
+                        }
+                        total += page.total
+                        loaded = true
+                    } catch {
+                        login.problem = error.localizedDescription
+                    }
+                }
+            }
+        }
+        for place in everywhere ? [] : ref == .allInboxes ? inboxes : [ref] {
             guard let login = login(place.login) else { continue }
             do {
                 let page = try await login.client.conversations(account: place.account, mailbox: place.mailbox, search: search, unreadOnly: unreadOnly, limit: limit)
@@ -368,7 +641,7 @@ final class MailStore {
                 login.problem = error.localizedDescription
                 // Offline: the list from last time.
                 if search.isEmpty, !unreadOnly, let cached = login.cache.list(account: place.account, mailbox: place.mailbox) {
-                    rows += cached.conversations.map { ($0, place) }
+                    rows += withQueued(cached.conversations, in: place).map { ($0, place) }
                     total += cached.total
                     loaded = true
                 }
@@ -376,7 +649,7 @@ final class MailStore {
         }
         // A newer load (another mailbox, a longer search) has started since, or nothing could be loaded at all.
         guard generation == listGeneration, loaded else { return }
-        if ref == .allInboxes {
+        if ref == .allInboxes || everywhere {
             rows.sort { ($0.conversation.email.receivedAt ?? .distantPast) > ($1.conversation.email.receivedAt ?? .distantPast) }
         }
         rows = Array(rows.prefix(limit))
@@ -396,10 +669,16 @@ final class MailStore {
         self.total = total
     }
 
-    func loadMore() async {
-        guard conversations.count < total, !isLoading else { return }
+    /// The next page. False when nothing more came (the server couldn't be reached), so the list offers to try again.
+    @discardableResult
+    func loadMore() async -> Bool {
+        // A load already running (a refresh) finishes first; then this one asks for more.
+        while isLoading { try? await Task.sleep(for: .milliseconds(100)) }
+        guard conversations.count < total else { return true }
+        let before = conversations.count
         limit += 50
         await loadList()
+        return conversations.count > before
     }
 
     /// Open a conversation in the reader (nil closes it). Reading marks it read, as in Mail.
@@ -442,6 +721,24 @@ final class MailStore {
         let trash = mailbox(role: "trash", in: place)?.id
         let showTrash = mailbox(place)?.role == "trash"
         return emails.filter { email in showTrash || trash.map { email.mailboxIds[$0] != true } ?? true }
+    }
+
+    /// The raw source of a message (the newest in the reader, by default).
+    func sourceKey(of email: Email? = nil, in place: MailboxRef? = nil) -> RawSourceKey? {
+        guard let email = email ?? replyTarget, let blobId = email.blobId, let place = place ?? threadPlace else { return nil }
+        return RawSourceKey(place: place, blobId: blobId, subject: email.subject ?? "")
+    }
+
+    /// A conversation from the list in a window of its own.
+    func openInWindow(_ id: String) {
+        guard let place = place(of: id) else { return }
+        openWindow?(id: "conversation", value: OpenConversation(place: place, threadId: id))
+    }
+
+    /// The messages of a conversation in a window of its own (the Trash's hidden, unless it's in the Trash).
+    func messages(_ c: OpenConversation) async throws -> [Email] {
+        guard let login = login(c.place.login) else { throw NotConnected() }
+        return visible(try await login.client.conversation(account: c.place.account, threadId: c.threadId), in: c.place)
     }
 
     /// Bring up a conversation in a mailbox, such as new mail whose notification was clicked.
@@ -508,12 +805,116 @@ final class MailStore {
         try await login.client.update(account: place.account, Dictionary(emails.map { ($0.id, patch($0)) }, uniquingKeysWith: { a, _ in a }))
     }
 
+    // MARK: Changes made offline
+
+    /// Changes made while the server couldn't be reached, oldest first; sent when it's back (also after quitting).
+    private(set) var queued: [QueuedChange] = QueuedChange.load()
+
+    static func isOffline(_ error: Error) -> Bool {
+        guard let error = error as? URLError else { return false }
+        return [.notConnectedToInternet, .networkConnectionLost, .cannotConnectToHost, .cannotFindHost, .dnsLookupFailed,
+                .timedOut, .internationalRoamingOff, .dataNotAllowed, .secureConnectionFailed].contains(error.code)
+    }
+
+    /// Make a change on the server now; offline, keep it to send later. Returns the messages it changed (nil when
+    /// it waits, or failed).
+    @discardableResult
+    private func apply(_ change: QueuedChange) async -> [Email]? {
+        do {
+            return try await perform(change)
+        } catch {
+            if Self.isOffline(error) {
+                enqueue(change)
+            } else {
+                alert = error.localizedDescription
+            }
+            return nil
+        }
+    }
+
+    private func enqueue(_ change: QueuedChange) {
+        queued.append(change)
+        QueuedChange.save(queued)
+    }
+
+    /// One change on the server, worked out from what's there now (so one made offline still does the right thing).
+    private func perform(_ change: QueuedChange) async throws -> [Email] {
+        let place = change.place
+        let ids = Set(change.threadIds)
+        let emails = try await targets(ids, in: place)
+        let newest = Dictionary(grouping: emails, by: \.threadId).values.compactMap { $0.max { ($0.receivedAt ?? .distantPast) < ($1.receivedAt ?? .distantPast) } }
+        switch change.kind {
+        case .move:
+            guard let role = change.role, let target = mailbox(role: role, in: place), target.id != place.mailbox else { return [] }
+            let folders = folders(in: place)
+            try await update(emails, in: place) { Patch.move($0, to: target.id, folders: folders) }
+        case .read:
+            // Marking unread marks the newest message, as Mail does; marking read covers the whole conversation.
+            let read = change.on ?? true
+            try await update(read ? emails.filter(\.isUnread) : newest, in: place) { _ in Patch.keyword("$seen", read) }
+        case .flag:
+            // Flagging flags the newest message; unflagging clears every flag in the conversation.
+            let flag = change.on ?? true
+            try await update(flag ? newest : emails.filter(\.isFlagged), in: place) { _ in Patch.keyword("$flagged", flag) }
+        case .label:
+            guard let label = change.label else { return [] }
+            try await update(emails, in: place) { _ in Patch.label(label, change.on ?? true) }
+        case .snooze:
+            guard let until = change.until, let snoozed = mailbox(role: "snoozed", in: place) else { return [] }
+            let folders = folders(in: place)
+            try await update(emails, in: place) { Patch.snooze($0, until: until, snoozedMailbox: snoozed.id, folders: folders) }
+        }
+        return emails
+    }
+
+    /// Send what was changed offline in one sign-in, in order, once it's connected again. A change the server refuses
+    /// (the mail was deleted meanwhile, say) is dropped and said under the sidebar.
+    private func sendQueued(_ login: Login) async {
+        var sent = false
+        for change in queued where change.place.login == login.id {
+            do {
+                _ = try await perform(change)
+            } catch {
+                if Self.isOffline(error) { break }
+                login.problem = "A change made offline couldn’t be saved: \(error.localizedDescription)"
+            }
+            queued.removeAll { $0.id == change.id }
+            sent = true
+        }
+        if sent { QueuedChange.save(queued) }
+    }
+
+    /// A list kept from last time, with the changes still waiting applied, so it shows what you did offline.
+    private func withQueued(_ list: [Conversation], in place: MailboxRef) -> [Conversation] {
+        var list = list
+        for change in queued where change.place.login == place.login && change.place.account == place.account {
+            let ids = Set(change.threadIds)
+            switch change.kind {
+            case .move, .snooze:
+                if change.place.mailbox == place.mailbox { list.removeAll { ids.contains($0.id) } }
+            case .label where change.on == false && change.label == place.mailbox:
+                list.removeAll { ids.contains($0.id) }
+            case .read, .flag:
+                let keyword = change.kind == .read ? "$seen" : "$flagged"
+                for i in list.indices where ids.contains(list[i].id) { list[i].email.keywords[keyword] = change.on == true ? true : nil }
+            default:
+                break
+            }
+        }
+        return list
+    }
+
+    /// How many changes are waiting for a sign-in's connection.
+    func queuedCount(_ login: Login) -> Int { queued.filter { $0.place.login == login.id }.count }
+
     func archive(_ ids: Set<String>, in place: MailboxRef? = nil) async {
         await move(ids, in: place, to: "archive", actionName: "Archive")
     }
 
     /// To the Trash; in the Trash, delete for good after asking.
-    func trash(_ ids: Set<String>) async {
+    func trash(_ ids: Set<String>, in place: MailboxRef? = nil) async {
+        // From a conversation window, never from the Trash itself (it has no Delete Forever).
+        if let place { return await move(ids, in: place, to: "trash", actionName: "Move to Trash") }
         if currentRole == "trash" { confirmingDelete = ids } else { await move(ids, to: "trash", actionName: "Move to Trash") }
     }
 
@@ -526,6 +927,32 @@ final class MailStore {
         await move(ids, to: "inbox", actionName: "Move to Inbox")
     }
 
+    /// The folders conversations can be moved to from Move to: Inbox, Archive, Junk and Trash, less the one they're in.
+    /// Drafts and Sent keep their own (Trash only).
+    var moveTargets: [String] {
+        guard let role = currentRole, !["drafts", "sent"].contains(role) else { return [] }
+        return ["inbox", "archive", "junk", "trash"].filter { $0 != role }
+    }
+
+    /// Whether Move to Inbox is the way back from here (Archive, Trash and Snoozed; Junk has Not Junk).
+    var canMoveToInbox: Bool { ["archive", "trash", "snoozed"].contains(currentRole ?? "") }
+
+    static func folderName(_ role: String) -> String {
+        switch role {
+        case "inbox": "Inbox"
+        case "archive": "Archive"
+        case "junk": "Junk"
+        case "trash": "Trash"
+        default: role.capitalized
+        }
+    }
+
+    /// To a folder chosen in Move to.
+    func move(_ ids: Set<String>, toFolder role: String) async {
+        if role == "trash" { return await trash(ids) }
+        await move(ids, to: role, actionName: "Move to \(Self.folderName(role))")
+    }
+
     /// Conversations from where they're shown (or from `only`, for a notification) to the folder with this role.
     private func move(_ ids: Set<String>, in only: MailboxRef? = nil, to role: String, actionName: String) async {
         var moves: [(place: MailboxRef, ids: Set<String>, target: String)] = []
@@ -535,15 +962,9 @@ final class MailStore {
         guard !moves.isEmpty else { return }
         removeFromList(Set(moves.flatMap { $0.ids }))
         var moved: [(emails: [Email], place: MailboxRef)] = []
-        do {
-            for move in moves {
-                let folders = folders(in: move.place)
-                let emails = try await targets(move.ids, in: move.place)
-                try await update(emails, in: move.place) { Patch.move($0, to: move.target, folders: folders) }
-                moved.append((emails, move.place))
-            }
-        } catch {
-            alert = error.localizedDescription
+        for move in moves {
+            // Offline, it waits to be sent (and can't be undone, as nothing has happened yet).
+            if let emails = await apply(QueuedChange(.move, in: move.place, ids: move.ids, role: role)) { moved.append((emails, move.place)) }
         }
         if !moved.isEmpty {
             let done = moved
@@ -552,7 +973,7 @@ final class MailStore {
             }
             undoManager?.setActionName(actionName)
         }
-        await refresh()
+        await refresh(moves.map(\.place))
     }
 
     /// Undo a move: back where each message was (snoozed ones come back to the Inbox).
@@ -570,7 +991,7 @@ final class MailStore {
         } catch {
             alert = error.localizedDescription
         }
-        await refresh()
+        await refresh(moved.map(\.place))
     }
 
     func deleteForever(_ ids: Set<String>) async {
@@ -583,22 +1004,16 @@ final class MailStore {
         } catch {
             alert = error.localizedDescription
         }
-        await refresh()
+        await refresh(groups.keys)
     }
 
     func setRead(_ ids: Set<String>, _ read: Bool, in only: MailboxRef? = nil) async {
         updateRows(ids) { $0.keywords["$seen"] = read ? true : nil }
-        do {
-            for (place, ids) in only.map({ [$0: ids] }) ?? places(ids) {
-                let emails = try await targets(ids, in: place)
-                // Marking unread marks the newest message, as Mail does; marking read covers the whole conversation.
-                let chosen = read ? emails.filter(\.isUnread) : Dictionary(grouping: emails, by: \.threadId).values.compactMap { $0.max { ($0.receivedAt ?? .distantPast) < ($1.receivedAt ?? .distantPast) } }
-                try await update(chosen, in: place) { _ in Patch.keyword("$seen", read) }
-            }
-        } catch {
-            alert = error.localizedDescription
+        let groups = only.map { [$0: ids] } ?? places(ids)
+        for (place, ids) in groups {
+            await apply(QueuedChange(.read, in: place, ids: ids, on: read))
         }
-        await refresh()
+        await refresh(groups.keys)
     }
 
     private func markRead(_ emails: [Email]) async {
@@ -609,6 +1024,8 @@ final class MailStore {
         do {
             try await update(emails, in: place) { _ in Patch.keyword("$seen", true) }
         } catch {
+            // Offline: marked read once the connection is back.
+            if Self.isOffline(error) { enqueue(QueuedChange(.read, in: place, ids: Set(emails.map(\.threadId)), on: true)) }
             login(place.login)?.problem = error.localizedDescription
         }
     }
@@ -617,14 +1034,11 @@ final class MailStore {
         let rows = conversations.filter { ids.contains($0.id) }
         let flag = !rows.allSatisfy(\.email.isFlagged)
         updateRows(ids) { $0.keywords["$flagged"] = flag ? true : nil }
-        do {
-            for (place, ids) in places(ids) {
-                try await update(rows.filter { ids.contains($0.id) }.map(\.email), in: place) { _ in Patch.keyword("$flagged", flag) }
-            }
-        } catch {
-            alert = error.localizedDescription
+        let groups = places(ids)
+        for (place, ids) in groups {
+            await apply(QueuedChange(.flag, in: place, ids: ids, on: flag))
         }
-        await refresh()
+        await refresh(groups.keys)
     }
 
     /// Whether every selected conversation is flagged (so Flag reads Unflag).
@@ -643,16 +1057,10 @@ final class MailStore {
     func snooze(_ ids: Set<String>, until: Date) async {
         let groups = places(ids)
         removeFromList(ids)
-        do {
-            for (place, ids) in groups {
-                guard let snoozed = mailbox(role: "snoozed", in: place) else { continue }
-                let folders = folders(in: place)
-                try await update(targets(ids, in: place), in: place) { Patch.snooze($0, until: until, snoozedMailbox: snoozed.id, folders: folders) }
-            }
-        } catch {
-            alert = error.localizedDescription
+        for (place, ids) in groups where mailbox(role: "snoozed", in: place) != nil {
+            await apply(QueuedChange(.snooze, in: place, ids: ids, until: until))
         }
-        await refresh()
+        await refresh(groups.keys)
     }
 
     func hasLabel(_ label: Mailbox, _ ids: Set<String>) -> Bool {
@@ -662,27 +1070,93 @@ final class MailStore {
 
     func setLabel(_ label: Mailbox, _ on: Bool, for ids: Set<String>) async {
         if !on && label.id == selectedMailbox?.mailbox { removeFromList(ids) }
-        do {
-            // Labels belong to one account.
-            for (place, ids) in places(ids) where labels(in: place).contains(label) {
-                try await update(targets(ids, in: place), in: place) { _ in Patch.label(label.id, on) }
+        // Labels belong to one account.
+        let groups = places(ids).filter { labels(in: $0.key).contains(label) }
+        for (place, ids) in groups {
+            await apply(QueuedChange(.label, in: place, ids: ids, on: on, label: label.id))
+        }
+        await refresh(groups.keys)
+    }
+
+    // MARK: Labels
+
+    /// Make a label, or rename one (from `labelEditor`). Throws so the sheet can say what's wrong.
+    func saveLabel(_ edit: LabelEdit, name: String) async throws {
+        let name = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let login = login(edit.login) else { throw NotConnected() }
+        if let label = edit.label {
+            try await login.client.renameLabel(label, to: name, account: edit.account)
+        } else {
+            let id = try await login.client.createLabel(name, account: edit.account)
+            // Made from a conversation's Labels menu: those conversations get it straight away.
+            if !edit.labelling.isEmpty {
+                await refresh(login)
+                if let label = labels(in: MailboxRef(login: login.id, account: edit.account, mailbox: "")).first(where: { $0.id == id }) {
+                    await setLabel(label, true, for: edit.labelling)
+                }
+                return
             }
+        }
+        await refresh(login)
+    }
+
+    /// Delete a label after asking (its mail stays in its folders).
+    func deleteLabel(_ ref: MailboxRef) async {
+        guard let login = login(ref.login) else { return }
+        do {
+            try await login.client.deleteLabel(ref.mailbox, account: ref.account)
+            if selectedMailbox == ref { selectedMailbox = nil }
         } catch {
             alert = error.localizedDescription
         }
-        await refresh()
+        await refresh(login)
+    }
+
+    // MARK: Dragging to the sidebar
+
+    /// What a conversation dragged out of the list carries: a marker and the thread ids (the list knows where they are).
+    static let dragPrefix = "wren-conversations:"
+
+    func dragPayload(for id: String) -> String {
+        let ids = selectedThreads.contains(id) ? selectedThreads : [id]
+        return Self.dragPrefix + ids.sorted().joined(separator: ",")
+    }
+
+    static func dropped(_ items: [String]) -> Set<String> {
+        Set(items.filter { $0.hasPrefix(dragPrefix) }.flatMap { $0.dropFirst(dragPrefix.count).split(separator: ",").map(String.init) })
+    }
+
+    /// Whether conversations from the list can be dropped on a sidebar mailbox: one in the same account, other than
+    /// the one being shown (moving between accounts would mean copying mail, which Wren doesn't do).
+    func canDrop(on ref: MailboxRef) -> Bool {
+        guard ref != .allInboxes, ref != selectedMailbox, let target = mailbox(ref) else { return false }
+        if ["drafts", "sent", "snoozed"].contains(target.role ?? "") { return false }
+        let from = selectedMailbox == .allInboxes || searchingEverywhere ? Set(rowPlaces.values.map { "\($0.login) \($0.account)" }) : Set([selectedMailbox].compactMap { $0.map { "\($0.login) \($0.account)" } })
+        return from.contains("\(ref.login) \(ref.account)")
+    }
+
+    /// Conversations dropped on a sidebar mailbox: moved to a folder, or given a label.
+    func drop(_ ids: Set<String>, on ref: MailboxRef) async {
+        let ids = ids.filter { place(of: $0).map { $0.login == ref.login && $0.account == ref.account } ?? false }
+        guard !ids.isEmpty, let target = mailbox(ref) else { return }
+        if let role = target.role {
+            await move(ids, toFolder: role)
+        } else {
+            await setLabel(target, true, for: ids)
+        }
     }
 
     /// Mark everything in a mailbox as read.
     func markAllRead(in ref: MailboxRef) async {
-        for place in ref == .allInboxes ? inboxes : [ref] {
+        let places = ref == .allInboxes ? inboxes : [ref]
+        for place in places {
             do {
                 try await login(place.login)?.client.markAllRead(account: place.account, mailbox: place.mailbox)
             } catch {
                 alert = error.localizedDescription
             }
         }
-        await refresh()
+        await refresh(places)
     }
 
     /// Delete everything in the Trash or Junk for good (after asking: see confirmingEmpty).
@@ -695,7 +1169,7 @@ final class MailStore {
         }
         // What was moved there can't be put back any more.
         undoManager?.removeAllActions()
-        await refresh()
+        await refresh(login)
     }
 
     private func updateRows(_ ids: Set<String>, _ change: (inout Email) -> Void) {
@@ -744,14 +1218,15 @@ final class MailStore {
         draft(in: writingPlace) { .new(account: $0, identity: $1.first, to: to) }
     }
 
-    func replyDraft(to email: Email? = nil, all: Bool) -> Draft? {
+    /// `place` is where the conversation is, for one in a window of its own; otherwise the reader's.
+    func replyDraft(to email: Email? = nil, all: Bool, in place: MailboxRef? = nil) -> Draft? {
         guard let email = email ?? replyTarget else { return nil }
-        return encrypted(email) { email in draft(in: threadPlace) { .reply(to: email, all: all, account: $0, identities: $1) } }
+        return encrypted(email) { email in draft(in: place ?? threadPlace) { .reply(to: email, all: all, account: $0, identities: $1) } }
     }
 
-    func forwardDraft(of email: Email? = nil) -> Draft? {
+    func forwardDraft(of email: Email? = nil, in place: MailboxRef? = nil) -> Draft? {
         guard let email = email ?? replyTarget else { return nil }
-        return encrypted(email) { email in draft(in: threadPlace) { .forward(email, account: $0, identities: $1) } }
+        return encrypted(email) { email in draft(in: place ?? threadPlace) { .forward(email, account: $0, identities: $1) } }
     }
 
     /// Answering encrypted mail: quoted as it was decrypted (when it was), and encrypted again by default.
@@ -769,8 +1244,18 @@ final class MailStore {
         decrypted = [:]
     }
 
-    func editDraft(_ email: Email) -> Draft? {
-        draft(in: threadPlace) { .editing(email, account: $0, identities: $1) }
+    func editDraft(_ email: Email, in place: MailboxRef? = nil) -> Draft? {
+        draft(in: place ?? threadPlace) { .editing(email, account: $0, identities: $1) }
+    }
+
+    /// The draft in a conversation in the list, to keep writing it; fetched when the reader hasn't loaded it yet.
+    func draftToEdit(inThread id: String) async -> Draft? {
+        if let email = thread.last(where: { $0.isDraft && $0.threadId == id }) { return editDraft(email) }
+        guard let place = place(of: id), let login = login(place.login),
+              let emails = try? await login.client.conversation(account: place.account, threadId: id),
+              let email = emails.last(where: \.isDraft)
+        else { return nil }
+        return draft(in: place) { .editing(email, account: $0, identities: $1) }
     }
 
     /// The sign-in a draft is written in (drafts saved before there were several belong to the first).
@@ -799,14 +1284,80 @@ final class MailStore {
         return id
     }
 
-    func send(_ draft: Draft, savedAs emailId: String, at date: Date? = nil) async throws {
+    /// Send a saved draft, at `date` or now. Sent now from a message window (`undo` is the message as written, to
+    /// open again), it's held for a few seconds first (Settings → Composing), so Undo Send can stop it.
+    func send(_ draft: Draft, savedAs emailId: String, at date: Date? = nil, undo: Draft? = nil) async throws {
         guard let login = login(of: draft), let place = place(of: draft), let identity = identity(for: draft),
               let drafts = mailbox(role: "drafts", in: place), let sent = mailbox(role: "sent", in: place)
         else { throw NotConnected() }
-        try await login.client.submit(
-            emailId: emailId, account: draft.accountId, identity: identity, recipients: draft.recipients, sendAt: date,
+        let hold = Self.undoSendSeconds
+        let held = date == nil && undo != nil && hold > 0 ? Date.now.addingTimeInterval(Double(hold)) : nil
+        let submission = try await login.client.submit(
+            emailId: emailId, account: draft.accountId, identity: identity, recipients: draft.recipients, sendAt: date ?? held,
             privateLinkDays: draft.privateLinkDays, draftsMailbox: drafts.id, sentMailbox: sent.id
         )
+        if let held, let undo, submission.isPending {
+            let pending = PendingSend(submission: submission.id, login: login.id, account: draft.accountId, draft: undo, until: submission.sendAt ?? held)
+            pendingSend = pending
+            undoManager?.registerUndo(withTarget: self) { store in
+                Task { await store.undoSend(pending) }
+            }
+            undoManager?.setActionName("Send")
+            Task { [weak self] in
+                try? await Task.sleep(for: .seconds(max(0, pending.until.timeIntervalSinceNow) + 1))
+                if self?.pendingSend == pending { self?.pendingSend = nil }
+            }
+        }
+        await refresh(login)
+    }
+
+    /// How long a message waits before it goes, so it can be undone (0: straight away).
+    static var undoSendSeconds: Int {
+        UserDefaults.standard.object(forKey: "undoSendSeconds") as? Int ?? 10
+    }
+
+    /// Stop a message held for Undo Send and open it again to keep writing.
+    func undoSend(_ pending: PendingSend? = nil) async {
+        guard let pending = pending ?? pendingSend, let login = login(pending.login) else { return }
+        if pendingSend == pending { pendingSend = nil }
+        do {
+            let back = try await login.client.cancel(submission: pending.submission, account: pending.account)
+            var draft = pending.draft
+            draft.replaces = back
+            openWindow?(id: "compose", value: draft)
+            NSApp.activate()
+        } catch JMAPError.notSaved("cannotUnsend", _) {
+            alert = "It was too late to undo: the message has been sent."
+        } catch {
+            alert = "The message couldn’t be stopped: \(error.localizedDescription)"
+        }
+        await refresh(login)
+    }
+
+    // MARK: Scheduled messages
+
+    /// Messages waiting to go out in every sign-in's accounts, soonest first.
+    func scheduled() async -> [(submission: Submission, login: String, account: String)] {
+        var out: [(submission: Submission, login: String, account: String)] = []
+        for login in logins {
+            for account in login.accounts where account.canSend != false {
+                guard let list = try? await login.client.pendingSubmissions(account: account.id) else { continue }
+                out += list.map { ($0, login.id, account.id) }
+            }
+        }
+        return out.sorted { ($0.submission.sendAt ?? .distantFuture) < ($1.submission.sendAt ?? .distantFuture) }
+    }
+
+    /// Stop a scheduled message; it goes back to Drafts. With `edit`, it opens to change and send again.
+    func cancelScheduled(_ submission: Submission, login loginId: String, account: String, edit: Bool) async throws {
+        guard let login = login(loginId) else { throw NotConnected() }
+        let back = try await login.client.cancel(submission: submission.id, account: account)
+        if edit, let back, let threadId = submission.threadId,
+           let email = try await login.client.conversation(account: account, threadId: threadId).first(where: { $0.id == back }) {
+            var d = Draft.editing(email, account: account, identities: login.identities[account] ?? [])
+            d.login = login.id
+            openWindow?(id: "compose", value: d)
+        }
         await refresh(login)
     }
 
@@ -819,8 +1370,10 @@ final class MailStore {
 
     /// Whether the conversation being read is in an account that can send (not a shared mailbox you can only read).
     /// Wren's session says; with an older server it's learned when an answer is refused.
-    var canSendHere: Bool {
-        guard let place = threadPlace else { return false }
+    var canSendHere: Bool { canSend(in: nil) }
+
+    func canSend(in place: MailboxRef?) -> Bool {
+        guard let place = place ?? threadPlace else { return false }
         if readOnly.contains("\(place.login) \(place.account)") { return false }
         return login(place.login)?.accounts.first { $0.id == place.account }?.canSend ?? true
     }
@@ -829,8 +1382,8 @@ final class MailStore {
 
     /// Unsubscribe from the list a message came from; Wren asks the list, or writes to it. When the list only has
     /// a page for it, that's what comes back to open.
-    func unsubscribe(_ email: Email) async throws -> Unsubscribed {
-        guard let place = threadPlace, let login = login(place.login) else { throw NotConnected() }
+    func unsubscribe(_ email: Email, in place: MailboxRef? = nil) async throws -> Unsubscribed {
+        guard let place = place ?? threadPlace, let login = login(place.login) else { throw NotConnected() }
         let done = try await login.client.unsubscribe(from: email.id, account: place.account)
         let sender = email.from?.first?.email.lowercased()
         for i in thread.indices where thread[i].from?.first?.email.lowercased() == sender { thread[i].unsubscribed = true }
@@ -839,8 +1392,8 @@ final class MailStore {
 
     /// Accept, maybe or decline the invitation in an email; the organizer gets the answer from Wren.
     /// Returns who the answer went to.
-    func answer(_ email: Email, _ answer: Invite.Answer, comment: String) async throws -> String? {
-        guard let place = threadPlace, let login = login(place.login) else { throw NotConnected() }
+    func answer(_ email: Email, _ answer: Invite.Answer, comment: String, in place: MailboxRef? = nil) async throws -> String? {
+        guard let place = place ?? threadPlace, let login = login(place.login) else { throw NotConnected() }
         let to: String?
         do {
             to = try await login.client.answer(invite: email.id, answer, comment: comment, account: place.account)
@@ -946,13 +1499,15 @@ final class MailStore {
     // MARK: Attachments
 
     /// The open conversation's sign-in and account, where its files come from.
-    var fileSource: (client: JMAPClient, account: String)? {
-        guard let place = threadPlace, let login = login(place.login) else { return nil }
+    var fileSource: (client: JMAPClient, account: String)? { fileSource(in: nil) }
+
+    func fileSource(in place: MailboxRef?) -> (client: JMAPClient, account: String)? {
+        guard let place = place ?? threadPlace, let login = login(place.login) else { return nil }
         return (login.client, place.account)
     }
 
-    func download(_ part: BodyPart) async throws -> Data {
-        guard let source = fileSource else { throw NotConnected() }
+    func download(_ part: BodyPart, in place: MailboxRef? = nil) async throws -> Data {
+        guard let source = fileSource(in: place) else { throw NotConnected() }
         return try await source.client.download(part, account: source.account)
     }
 
@@ -975,23 +1530,23 @@ final class MailStore {
         return url
     }
 
-    func temporaryFile(_ part: BodyPart) async throws -> URL {
-        guard let source = fileSource else { throw NotConnected() }
+    func temporaryFile(_ part: BodyPart, in place: MailboxRef? = nil) async throws -> URL {
+        guard let source = fileSource(in: place) else { throw NotConnected() }
         return try await Self.temporaryFile(part, account: source.account, client: source.client)
     }
 
     /// Open with its app.
-    func openAttachment(_ part: BodyPart) async {
+    func openAttachment(_ part: BodyPart, in place: MailboxRef? = nil) async {
         do {
-            NSWorkspace.shared.open(try await temporaryFile(part))
+            NSWorkspace.shared.open(try await temporaryFile(part, in: place))
         } catch {
             alert = error.localizedDescription
         }
     }
 
-    func saveAttachment(_ part: BodyPart) async {
+    func saveAttachment(_ part: BodyPart, in place: MailboxRef? = nil) async {
         do {
-            saveToDownloads(Self.fileName(part), try await download(part))
+            saveToDownloads(Self.fileName(part), try await download(part, in: place))
         } catch {
             alert = error.localizedDescription
         }

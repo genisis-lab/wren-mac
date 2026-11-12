@@ -67,7 +67,7 @@ final class WrenKitTests: XCTestCase {
         XCTAssertTrue(d.body.hasPrefix("\n\nAda\nWren\n\n"), d.body)
         XCTAssertTrue(d.body.hasSuffix("Grace wrote:\n\n> Noon?\n>> earlier"), d.body)
         // The editor gets the quote as HTML: the original's text, escaped, in a blockquote.
-        XCTAssertTrue(d.html?.hasPrefix("<br><br>Ada<br>Wren<br><br><div class=\"wren-quote\"><div>") == true, d.html ?? "")
+        XCTAssertTrue(d.html?.hasPrefix("<br><br><div class=\"wren-signature\">Ada<br>Wren</div><br><br><div class=\"wren-quote\"><div>") == true, d.html ?? "")
         XCTAssertTrue(d.html?.contains("<pre style=\"white-space:pre-wrap;font-family:inherit\">Noon?\n&gt; earlier</pre></blockquote>") == true, d.html ?? "")
         var rich = email
         rich.htmlBody = [BodyPart(partId: "h", size: 1, type: "text/html")]
@@ -281,6 +281,41 @@ final class WrenKitTests: XCTestCase {
         XCTAssertEqual(clean("mailto:ada@example.com?subject=utm_x"), "mailto:ada@example.com?subject=utm_x")
     }
 
+    func testForgottenAttachmentsAreNoticed() {
+        var d = Draft(accountId: "u1")
+        d.setHTML("Here’s the plan, attached.<br><br><div class=\"wren-signature\">Ada</div>")
+        XCTAssertTrue(d.forgotAttachment)
+        d.files = [Draft.File(blobId: "B1", name: "plan.pdf", type: "application/pdf", size: 1)]
+        XCTAssertFalse(d.forgotAttachment)
+        // Only what you wrote counts: not the quote you're answering, nor your signature.
+        var reply = Draft(accountId: "u1")
+        reply.setHTML("Sounds good.<br><br><div class=\"wren-quote\"><div>Grace wrote:</div><blockquote>I attached the slides.</blockquote></div>")
+        XCTAssertFalse(reply.forgotAttachment)
+        var signed = Draft(accountId: "u1")
+        signed.setHTML("Thanks!<br><br><div class=\"wren-signature\">Attachments are scanned</div>")
+        XCTAssertFalse(signed.forgotAttachment)
+        var plain = Draft(accountId: "u1")
+        plain.body = "See the enclosed form.\n\nOn 1 Dec, Grace wrote:\n\n> attached"
+        XCTAssertTrue(plain.forgotAttachment)
+        plain.body = "Thanks!\n\nOn 1 Dec, Grace wrote:\n\n> attached"
+        XCTAssertFalse(plain.forgotAttachment)
+        // Words that only start the same don't count.
+        plain.body = "I'm attachedness-free"
+        XCTAssertFalse(plain.forgotAttachment)
+    }
+
+    func testSignaturesKeepTheirFormatting() {
+        let rich = Identity(id: "I1", name: "Ada", email: "ada@wren.test", textSignature: "Ada Wren", htmlSignature: "<b>Ada</b> <a href=\"https://wren.test\">Wren</a>")
+        let d = Draft.new(account: "u1", identity: rich)
+        XCTAssertEqual(d.html, "<br><br><div class=\"wren-signature\"><b>Ada</b> <a href=\"https://wren.test\">Wren</a></div>")
+        XCTAssertEqual(d.body, "\n\nAda Wren")
+        // No HTML one: the plain one, escaped; none at all: nothing, and no HTML part.
+        let plain = Identity(id: "I2", name: "Ada", email: "ada@wren.test", textSignature: "A <b>")
+        XCTAssertEqual(Draft.signatureInner(plain), "A &lt;b&gt;")
+        XCTAssertNil(Draft.new(account: "u1", identity: Identity(id: "I3", name: "", email: "x@wren.test")).html)
+        XCTAssertEqual(Draft.signatureInner(Identity(id: "I4", name: "", email: "x@wren.test", textSignature: "", htmlSignature: "<p><br></p>")), "")
+    }
+
     func testMailtoLinksBecomeDrafts() {
         let me = Identity(id: "I1", name: "Ada", email: "ada@wren.test", textSignature: "Ada")
         let d = Draft.mailto(URL(string: "mailto:grace@example.com,bob@example.com?cc=carol@example.com&subject=Lunch%20on%20Friday%3F&body=Hi%20Grace%2C%0D%0ANoon%3F&attach=/etc/passwd&to=dan@example.com")!, account: "u1", identity: me)
@@ -288,6 +323,7 @@ final class WrenKitTests: XCTestCase {
         XCTAssertEqual(d.cc, "carol@example.com")
         XCTAssertEqual(d.subject, "Lunch on Friday?")
         XCTAssertEqual(d.body, "Hi Grace,\nNoon?\n\nAda")
+        XCTAssertEqual(d.html, "Hi Grace,<br>Noon?<br><br><div class=\"wren-signature\">Ada</div>")
         XCTAssertTrue(d.files.isEmpty)
         XCTAssertEqual(Draft.mailto(URL(string: "MAILTO:?subject=Hi")!, account: "u1", identity: nil).to, "")
     }
@@ -367,6 +403,133 @@ final class WrenKitTests: XCTestCase {
         XCTAssertEqual(found, [
             EmailAddress(name: "Grace Hopper", email: "grace@example.com"), EmailAddress(name: "Grace Hopper", email: "g@navy.mil"), EmailAddress(email: "greg@example.com"),
         ])
+    }
+
+    func testOnlyWhatChangedIsFetched() async throws {
+        XCTAssertEqual(
+            JMAPClient.changedStates(#"{"@type":"StateChange","changed":{"u1":{"Email":"7","Mailbox":"7"},"s9":{"Mailbox":"3"}}}"#),
+            ["u1": "7", "s9": "3"]
+        )
+        XCTAssertEqual(JMAPClient.changedStates("not json"), [:])
+        let client = JMAPClient(server: URL(string: "https://mail.test")!, username: "ada@wren.test", password: "wren_app", http: Mock.session)
+        Mock.handler = { request in
+            if request.url?.path == "/jmap/session" {
+                return [
+                    "apiUrl": "https://mail.test/jmap/api", "downloadUrl": "", "uploadUrl": "", "username": "ada@wren.test",
+                    "capabilities": [Capability.core: [:], Capability.mail: [:]],
+                    "accounts": ["u1": ["name": "ada@wren.test", "isPersonal": true, "accountCapabilities": [Capability.mail: [:]]]],
+                ]
+            }
+            let body = try JSONDecoder().decode(JSON.self, from: Mock.body(of: request))
+            let call = body["methodCalls"]?.array?.first?.array ?? []
+            let args = call[1]
+            if call[0] == "Email/get" {
+                XCTAssertEqual(args["ids"], ["M2"])
+                return ["methodResponses": [["Email/get", ["list": [["id": "M2", "threadId": "T2", "mailboxIds": ["inbox": true], "keywords": ["$seen": true]]]], "0"]]]
+            }
+            // Two pages: M1 made then changed, M3 changed then deleted.
+            if args["sinceState"] == "5" {
+                return ["methodResponses": [["Email/changes", ["oldState": "5", "newState": "6", "hasMoreChanges": true, "created": ["M1"], "updated": ["M2", "M3"], "destroyed": []], "0"]]]
+            }
+            if args["sinceState"] == "6" {
+                return ["methodResponses": [["Email/changes", ["oldState": "6", "newState": "8", "hasMoreChanges": false, "created": [], "updated": ["M1", "M2"], "destroyed": ["M3"]], "0"]]]
+            }
+            return ["methodResponses": [["error", ["type": "cannotCalculateChanges"], "0"]]]
+        }
+        let changes = try await client.emailChanges(account: "u1", since: "5")
+        XCTAssertEqual(changes, EmailChanges(created: ["M1"], updated: ["M2"], destroyed: ["M3"], newState: "8"))
+        do {
+            _ = try await client.emailChanges(account: "u1", since: "1")
+            XCTFail("An old state can't be followed")
+        } catch JMAPError.method(let type, _) {
+            XCTAssertEqual(type, "cannotCalculateChanges")
+        }
+        let emails = try await client.emails(["M2"], account: "u1")
+        XCTAssertEqual(emails.first?.isUnread, false)
+        let none = try await client.emails([], account: "u1")
+        XCTAssertTrue(none.isEmpty)
+    }
+
+    func testLabelsAreMadeRenamedAndDeleted() async throws {
+        let client = JMAPClient(server: URL(string: "https://mail.test")!, username: "ada@wren.test", password: "wren_app", http: Mock.session)
+        nonisolated(unsafe) var seen: [JSON] = []
+        Mock.handler = { request in
+            if request.url?.path == "/jmap/session" {
+                return [
+                    "apiUrl": "https://mail.test/jmap/api", "downloadUrl": "", "uploadUrl": "", "username": "ada@wren.test",
+                    "capabilities": [Capability.core: [:], Capability.mail: [:]],
+                    "accounts": ["u1": ["name": "ada@wren.test", "isPersonal": true, "accountCapabilities": [Capability.mail: [:]]]],
+                ]
+            }
+            let body = try JSONDecoder().decode(JSON.self, from: Mock.body(of: request))
+            let args = body["methodCalls"]?.array?.first?.array?[1] ?? nil
+            seen.append(args)
+            if args["create"] != nil { return ["methodResponses": [["Mailbox/set", ["created": ["label": ["id": "L7"]]], "0"]]] }
+            if args["update"] != nil { return ["methodResponses": [["Mailbox/set", ["notUpdated": ["L7": ["type": "alreadyExists", "description": "A mailbox with that name exists"]]], "0"]]] }
+            return ["methodResponses": [["Mailbox/set", ["destroyed": ["L7"]], "0"]]]
+        }
+        let id = try await client.createLabel("Travel", account: "u1")
+        XCTAssertEqual(id, "L7")
+        do {
+            try await client.renameLabel("L7", to: "Work", account: "u1")
+            XCTFail("A taken name is refused")
+        } catch {
+            XCTAssertEqual(error.localizedDescription, "A mailbox with that name exists")
+        }
+        try await client.deleteLabel("L7", account: "u1")
+        XCTAssertEqual(seen.map { $0["create"]?["label"]?["name"] }, ["Travel", nil, nil])
+        XCTAssertEqual(seen.last?["onDestroyRemoveEmails"], true)
+        XCTAssertEqual(seen.last?["destroy"], ["L7"])
+    }
+
+    func testHeldSendsCanBeListedAndStopped() async throws {
+        let client = JMAPClient(server: URL(string: "https://mail.test")!, username: "ada@wren.test", password: "wren_app", http: Mock.session)
+        Mock.handler = { request in
+            if request.url?.path == "/jmap/session" {
+                return [
+                    "apiUrl": "https://mail.test/jmap/api", "downloadUrl": "", "uploadUrl": "", "username": "ada@wren.test",
+                    "capabilities": [Capability.core: [:], Capability.mail: [:]],
+                    "accounts": ["u1": ["name": "ada@wren.test", "isPersonal": true, "accountCapabilities": [Capability.mail: [:]]]],
+                ]
+            }
+            let body = try JSONDecoder().decode(JSON.self, from: Mock.body(of: request))
+            let calls = body["methodCalls"]?.array ?? []
+            let first = calls.first?.array ?? []
+            switch first.first?.string {
+            case "EmailSubmission/query":
+                XCTAssertEqual(first[1]["filter"], ["undoStatus": "pending"])
+                return ["methodResponses": [
+                    ["EmailSubmission/query", ["ids": ["S2", "S1"]], "0"],
+                    ["EmailSubmission/get", ["list": [
+                        ["id": "S2", "emailId": "M2", "threadId": "T2", "sendAt": "2026-12-02T09:00:00Z", "undoStatus": "pending"],
+                        ["id": "S1", "emailId": "M1", "threadId": "T1", "sendAt": "2026-12-01T09:00:00.000Z", "undoStatus": "pending"],
+                    ]], "1"],
+                    ["Email/get", ["list": [["id": "M1", "subject": "Plans", "to": [["name": "Grace", "email": "grace@example.com"]], "cc": nil, "bcc": []]]], "2"],
+                ]]
+            case "EmailSubmission/set" where first[1]["update"] != nil:
+                XCTAssertEqual(first[1]["update"], ["S1": ["undoStatus": "canceled"]])
+                return ["methodResponses": [
+                    ["EmailSubmission/set", ["updated": ["S1": nil]], "0"],
+                    ["EmailSubmission/get", ["list": [["id": "S1", "emailId": "M9"]]], "1"],
+                ]]
+            default:
+                // Held for undo: HOLDUNTIL in the envelope; the server says it's pending.
+                XCTAssertNotNil(first[1]["create"]?["send"]?["envelope"]?["mailFrom"]?["parameters"]?["HOLDUNTIL"])
+                return ["methodResponses": [["EmailSubmission/set", ["created": ["send": ["id": "S3", "undoStatus": "pending", "sendAt": "2026-12-01T09:00:10Z"]]], "0"]]]
+            }
+        }
+        let me = Identity(id: "I1", name: "Ada", email: "ada@wren.test")
+        let sent = try await client.submit(emailId: "M3", account: "u1", identity: me, recipients: [EmailAddress(email: "grace@example.com")], sendAt: .now + 10, draftsMailbox: "d", sentMailbox: "s")
+        XCTAssertEqual(sent.id, "S3")
+        XCTAssertTrue(sent.isPending)
+        XCTAssertEqual(sent.sendAt, parseUTCDate("2026-12-01T09:00:10Z"))
+        let list = try await client.pendingSubmissions(account: "u1")
+        XCTAssertEqual(list.map(\.id), ["S1", "S2"])
+        XCTAssertEqual(list.first?.subject, "Plans")
+        XCTAssertEqual(list.first?.to.map(\.email), ["grace@example.com"])
+        XCTAssertEqual(list.first?.threadId, "T1")
+        let back = try await client.cancel(submission: "S1", account: "u1")
+        XCTAssertEqual(back, "M9")
     }
 
     func testWrenExtensionCalls() async throws {

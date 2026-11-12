@@ -104,6 +104,8 @@ public struct Identity: Codable, Hashable, Sendable, Identifiable {
     public var name: String
     public var email: String
     public var textSignature: String?
+    /// The signature as set in Wren on the web, with its formatting and links (Wren keeps it as HTML).
+    public var htmlSignature: String? = nil
 
     public var address: EmailAddress { EmailAddress(name: name, email: email) }
 }
@@ -374,4 +376,9 @@ extension JSONDecoder {
 /// A UTCDate for JMAP, such as 2026-10-26T09:00:00Z.
 func utcDate(_ date: Date) -> String {
     date.formatted(.iso8601)
+}
+
+/// A UTCDate from JMAP, with or without fractions of a second.
+func parseUTCDate(_ text: String) -> Date? {
+    (try? Date(text, strategy: .iso8601)) ?? (try? Date(text, strategy: Date.ISO8601FormatStyle(includingFractionalSeconds: true)))
 }

@@ -13,6 +13,13 @@ struct MessageWebView: NSViewRepresentable {
     let download: @MainActor (BodyPart) async throws -> Data
     let openLink: (URL) -> Void
     @Binding var height: CGFloat
+    /// Words to mark (Find), which of the matches is current, and where to say how many there are and where the
+    /// current one is (from the top of the message).
+    /// Text size in the reader (View → Bigger and Smaller), 1 for as sent.
+    var zoom: CGFloat = 1
+    var find = ""
+    var findCurrent: Int? = nil
+    var onFound: ((_ count: Int, _ currentY: CGFloat?) -> Void)? = nil
 
     func makeCoordinator() -> Coordinator { Coordinator(self) }
 
@@ -23,17 +30,60 @@ struct MessageWebView: NSViewRepresentable {
         config.setURLSchemeHandler(context.coordinator, forURLScheme: "cid")
         // The message's scripts are off; this one runs in the app's own script world and reports the height as it changes.
         config.userContentController.addUserScript(WKUserScript(source: Self.reportHeight, injectionTime: .atDocumentEnd, forMainFrameOnly: true, in: .defaultClient))
+        config.userContentController.addUserScript(WKUserScript(source: Self.findScript, injectionTime: .atDocumentEnd, forMainFrameOnly: true, in: .defaultClient))
         config.userContentController.add(context.coordinator, contentWorld: .defaultClient, name: "height")
         let view = MessageWKWebView(frame: .zero, configuration: config)
         view.navigationDelegate = context.coordinator
+        view.pageZoom = zoom
         context.coordinator.load(into: view)
         return view
     }
 
     func updateNSView(_ view: MessageWKWebView, context: Context) {
         context.coordinator.parent = self
+        if view.pageZoom != zoom {
+            view.pageZoom = zoom
+            context.coordinator.resized()
+        }
         context.coordinator.load(into: view)
+        context.coordinator.findIfChanged(in: view)
     }
+
+    /// Find: marks every match of the words in the message's text (not its tags), the current one in orange, and
+    /// returns how many there are and where the current one is.
+    private static let findScript = """
+    window.wrenFind = (q, current) => {
+      const root = document.getElementById('wren-message');
+      if (!root) return { count: 0, y: null };
+      for (const m of root.querySelectorAll('mark.wren-find')) m.replaceWith(document.createTextNode(m.textContent));
+      root.normalize();
+      if (!q) return { count: 0, y: null };
+      const lower = q.toLowerCase();
+      const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+      const nodes = [];
+      while (walker.nextNode()) nodes.push(walker.currentNode);
+      const hits = [];
+      for (let node of nodes) {
+        let at = node.nodeValue.toLowerCase().indexOf(lower);
+        while (at >= 0) {
+          const match = node.splitText(at);
+          node = match.splitText(q.length);
+          const mark = document.createElement('mark');
+          mark.className = 'wren-find';
+          match.replaceWith(mark);
+          mark.appendChild(match);
+          hits.push(mark);
+          at = node.nodeValue.toLowerCase().indexOf(lower);
+        }
+      }
+      let y = null;
+      if (current >= 0 && current < hits.length) {
+        hits[current].classList.add('current');
+        y = hits[current].getBoundingClientRect().top + window.scrollY;
+      }
+      return { count: hits.length, y };
+    };
+    """
 
     private static let reportHeight = """
     (() => {
@@ -79,6 +129,8 @@ struct MessageWebView: NSViewRepresentable {
         img { max-width: 100%; height: auto; }
         pre { white-space: pre-wrap; }
         blockquote { margin: 0 0 0 4px; padding-left: 12px; border-left: 2px solid #c7c7cc; color: #555; }
+        mark.wren-find { background: #ffe45c; color: #000; border-radius: 2px; }
+        mark.wren-find.current { background: #ff9f0a; }
         \(adaptive)
         </style></head><body><div id="wren-message">\(html)</div></body></html>
         """
@@ -89,6 +141,9 @@ struct MessageWebView: NSViewRepresentable {
         var parent: MessageWebView
         private var loaded: (html: String, allowRemote: Bool)?
         private var stopped = Set<ObjectIdentifier>()
+        /// The page has finished loading, and what Find last marked in it.
+        private var ready = false
+        private var found: (query: String, current: Int?)?
 
         init(_ parent: MessageWebView) {
             self.parent = parent
@@ -98,11 +153,46 @@ struct MessageWebView: NSViewRepresentable {
         func load(into view: WKWebView) {
             if let loaded, loaded.html == parent.html, loaded.allowRemote == parent.allowRemote { return }
             loaded = (parent.html, parent.allowRemote)
+            ready = false
+            found = nil
             view.loadHTMLString(MessageWebView.document(parent.html, allowRemote: parent.allowRemote), baseURL: nil)
         }
 
+        /// The page's height in its own (CSS) pixels; on screen it's that times the zoom.
+        private var pageHeight: CGFloat = 0
+
         func userContentController(_ controller: WKUserContentController, didReceive message: WKScriptMessage) {
-            if let height = (message.body as? NSNumber)?.doubleValue { parent.height = CGFloat(height) }
+            if let height = (message.body as? NSNumber)?.doubleValue {
+                pageHeight = CGFloat(height)
+                resized()
+            }
+        }
+
+        func resized() {
+            if pageHeight > 0 { parent.height = (pageHeight * parent.zoom).rounded(.up) }
+        }
+
+        func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+            ready = true
+            findIfChanged(in: webView)
+        }
+
+        /// Mark what Find is looking for, when that changed (or the page just loaded).
+        func findIfChanged(in view: WKWebView) {
+            guard ready else { return }
+            let query = parent.find, current = parent.findCurrent
+            if let found, found.query == query, found.current == current { return }
+            // Nothing marked and nothing asked: leave the page alone.
+            if found == nil, query.isEmpty { return }
+            found = (query, current)
+            Task { [weak self, weak view] in
+                guard let view, let value = try? await view.callAsyncJavaScript("return wrenFind(q, current)", arguments: ["q": query, "current": current ?? -1], in: nil, contentWorld: .defaultClient),
+                      let r = value as? [String: Any], let self
+                else { return }
+                let count = (r["count"] as? NSNumber)?.intValue ?? 0
+                let y = (r["y"] as? NSNumber).map { CGFloat($0.doubleValue) }
+                parent.onFound?(count, y)
+            }
         }
 
         func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction) async -> WKNavigationActionPolicy {

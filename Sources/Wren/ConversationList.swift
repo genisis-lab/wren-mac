@@ -10,46 +10,27 @@ struct ConversationList: View {
         let showRecipients = store.currentRole == "sent" || store.currentRole == "drafts"
         List(selection: $store.selectedThreads) {
             ForEach(store.conversations) { conversation in
-                ConversationRow(conversation: conversation, showRecipients: showRecipients)
+                // Searching all mail: which mailbox each one is in.
+                let folder = store.searchingEverywhere ? store.mailbox(store.place(of: conversation.id))?.name : nil
+                ConversationRow(conversation: conversation, showRecipients: showRecipients, folder: folder)
                     .tag(conversation.id)
-                    .swipeActions(edge: .leading) {
-                        let unread = conversation.email.isUnread
-                        Button {
-                            Task { await store.setRead([conversation.id], unread) }
-                        } label: {
-                            Label(unread ? "Read" : "Unread", systemImage: unread ? "envelope.open" : "envelope.badge")
-                        }
-                        .tint(.blue)
-                    }
-                    .swipeActions(edge: .trailing) {
-                        Button(role: .destructive) {
-                            Task { await store.trash([conversation.id]) }
-                        } label: {
-                            Label("Trash", systemImage: "trash")
-                        }
-                        if !["archive", "drafts", "sent"].contains(store.currentRole ?? "") {
-                            Button {
-                                Task { await store.archive([conversation.id]) }
-                            } label: {
-                                Label("Archive", systemImage: "archivebox")
-                            }
-                            .tint(.indigo)
-                        }
-                    }
+                    // Onto a sidebar mailbox or label (the whole selection, when this row is in it).
+                    .draggable(store.dragPayload(for: conversation.id))
+                    .modifier(RowActions(conversation: conversation))
             }
             if store.conversations.count < store.total {
-                ProgressView()
-                    .controlSize(.small)
-                    .frame(maxWidth: .infinity)
-                    .onAppear { Task { await store.loadMore() } }
+                LoadMoreRow()
             }
         }
         .contextMenu(forSelectionType: String.self) { ids in
             MessageActions(ids: ids)
         } primaryAction: { ids in
-            // Double-clicking a draft opens it to keep writing, as in Mail.
-            if ids.count == 1, let draft = store.thread.last(where: { $0.isDraft && ids.contains($0.threadId) }), let d = store.editDraft(draft) {
-                openWindow(id: "compose", value: d)
+            // Double-clicking a draft opens it to keep writing; anything else opens in a window of its own, as in Mail.
+            guard ids.count == 1, let id = ids.first else { return }
+            if store.currentRole == "drafts" {
+                Task { if let d = await store.draftToEdit(inThread: id) { openWindow(id: "compose", value: d) } }
+            } else {
+                store.openInWindow(id)
             }
         }
         .onDeleteCommand {
@@ -90,7 +71,7 @@ struct ConversationList: View {
             }
         }
         .task(id: store.selectedMailbox) { await store.showMailbox() }
-        .task(id: store.search) {
+        .task(id: "\(store.searchScope) \(store.search)") {
             // Search as you type, once typing pauses.
             try? await Task.sleep(for: .milliseconds(300))
             if !Task.isCancelled { await store.loadList() }
@@ -106,9 +87,95 @@ struct ConversationList: View {
     }
 }
 
+/// What a row offers besides a click: VoiceOver's actions and the swipes, kept apart so the list's body type-checks quickly.
+private struct RowActions: ViewModifier {
+    @Environment(MailStore.self) private var store
+    let conversation: Conversation
+
+    func body(content: Content) -> some View {
+        swipes(spoken(content))
+    }
+
+    /// VoiceOver's Actions rotor: what swipes and the right-click menu do.
+    private func spoken(_ content: Content) -> some View {
+        let id = conversation.id
+        let unread = conversation.email.isUnread
+        return content
+            .accessibilityAction(named: unread ? "Mark as Read" : "Mark as Unread") {
+                Task { await store.setRead([id], unread) }
+            }
+            .accessibilityAction(named: conversation.email.isFlagged ? "Unflag" : "Flag") {
+                Task { await store.toggleFlag([id]) }
+            }
+            .accessibilityAction(named: store.canMoveToInbox ? "Move to Inbox" : "Archive") {
+                Task {
+                    if store.canMoveToInbox { await store.moveToInbox([id]) } else { await store.archive([id]) }
+                }
+            }
+            .accessibilityAction(named: store.currentRole == "trash" ? "Delete Forever" : "Move to Trash") {
+                Task { await store.trash([id]) }
+            }
+            .accessibilityAction(named: "Open in New Window") { store.openInWindow(id) }
+    }
+
+    private func swipes(_ content: some View) -> some View {
+        let id = conversation.id
+        let unread = conversation.email.isUnread
+        return content
+            .swipeActions(edge: .leading) {
+                Button {
+                    Task { await store.setRead([id], unread) }
+                } label: {
+                    Label(unread ? "Read" : "Unread", systemImage: unread ? "envelope.open" : "envelope.badge")
+                }
+                .tint(.blue)
+            }
+            .swipeActions(edge: .trailing) {
+                Button(role: .destructive) {
+                    Task { await store.trash([id]) }
+                } label: {
+                    Label("Trash", systemImage: "trash")
+                }
+                if !["archive", "drafts", "sent"].contains(store.currentRole ?? "") {
+                    Button {
+                        Task { await store.archive([id]) }
+                    } label: {
+                        Label("Archive", systemImage: "archivebox")
+                    }
+                    .tint(.indigo)
+                }
+            }
+    }
+}
+
+/// The end of the list: loads the next page when it scrolls into view, or offers to try again when that failed.
+struct LoadMoreRow: View {
+    @Environment(MailStore.self) private var store
+    @State private var failed = false
+
+    var body: some View {
+        Group {
+            if failed {
+                Button("Load More") { load() }
+                    .buttonStyle(.link)
+            } else {
+                ProgressView().controlSize(.small)
+            }
+        }
+        .frame(maxWidth: .infinity)
+        .onAppear { load() }
+    }
+
+    private func load() {
+        failed = false
+        Task { failed = !(await store.loadMore()) }
+    }
+}
+
 struct ConversationRow: View {
     let conversation: Conversation
     let showRecipients: Bool
+    var folder: String? = nil
 
     private var email: Email { conversation.email }
 
@@ -146,6 +213,13 @@ struct ConversationRow: View {
                     }
                     if email.hasAttachment == true {
                         Image(systemName: "paperclip").imageScale(.small).foregroundStyle(.secondary)
+                    }
+                    if let folder {
+                        Text(folder)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .padding(.horizontal, 5)
+                            .background(.quaternary.opacity(0.6), in: Capsule())
                     }
                     Text(listDate(email.receivedAt))
                         .font(.subheadline)
@@ -185,6 +259,7 @@ struct ConversationRow: View {
         parts.append(subject)
         if conversation.count > 1 { parts.append("\(conversation.count) messages") }
         if email.hasAttachment == true { parts.append("Has attachments") }
+        if let folder { parts.append("In \(folder)") }
         parts.append(listDate(email.receivedAt))
         if let preview = email.preview, !preview.isEmpty { parts.append(preview) }
         return parts.joined(separator: ", ")
@@ -212,7 +287,7 @@ struct MessageActions: View {
         Button(anyUnread ? "Mark as Read" : "Mark as Unread") { Task { await store.setRead(ids, anyUnread) } }
         Button(rows.allSatisfy(\.email.isFlagged) ? "Unflag" : "Flag") { Task { await store.toggleFlag(ids) } }
         Divider()
-        if role == "snoozed" {
+        if store.canMoveToInbox {
             Button("Move to Inbox") { Task { await store.moveToInbox(ids) } }
         }
         if !["archive", "drafts", "sent"].contains(role) {
@@ -222,6 +297,13 @@ struct MessageActions: View {
         if !["drafts", "sent"].contains(role) {
             Button(role == "junk" ? "Not Junk" : "Move to Junk") { Task { await store.junk(ids) } }
         }
+        if !store.moveTargets.isEmpty {
+            Menu("Move to") {
+                ForEach(store.moveTargets, id: \.self) { target in
+                    Button(MailStore.folderName(target)) { Task { await store.move(ids, toFolder: target) } }
+                }
+            }
+        }
         if store.canSnooze {
             Menu("Snooze") {
                 ForEach(SnoozeTime.choices(), id: \.title) { choice in
@@ -229,7 +311,7 @@ struct MessageActions: View {
                 }
             }
         }
-        if let ref = store.selectedMailbox, !store.labels(in: ref).isEmpty {
+        if let ref = store.selectedMailbox, ref != .allInboxes {
             Menu("Labels") {
                 ForEach(store.labels(in: ref)) { label in
                     Toggle(label.name, isOn: Binding(
@@ -237,6 +319,8 @@ struct MessageActions: View {
                         set: { on in Task { await store.setLabel(label, on, for: ids) } }
                     ))
                 }
+                if !store.labels(in: ref).isEmpty { Divider() }
+                Button("New Label…") { store.labelEditor = LabelEdit(login: ref.login, account: ref.account, labelling: ids) }
             }
         }
     }

@@ -116,6 +116,19 @@ struct RichEditor: NSViewRepresentable {
           else document.execCommand('createLink', false, url);
           send();
         },
+        // Another From address: its signature in place of the last one (or added above the quote, if there was none).
+        signature(html) {
+          let sig = ed.querySelector('.wren-signature');
+          if (!html) { if (sig) sig.remove(); send(); return; }
+          if (!sig) {
+            sig = document.createElement('div');
+            sig.className = 'wren-signature';
+            const quote = ed.querySelector('.wren-quote');
+            for (const n of [document.createElement('br'), document.createElement('br'), sig]) ed.insertBefore(n, quote);
+          }
+          sig.innerHTML = html;
+          send();
+        },
         focusStart() {
           ed.focus();
           const r = document.createRange();
@@ -180,6 +193,8 @@ final class EditorController {
 
     func run(_ command: String) { if isTyping { call("wrenEditor.run(command)", ["command": command]) } }
     func toggleQuote() { if isTyping { call("wrenEditor.quote()") } }
+    /// Swap the signature (HTML from `Draft.signatureInner`; empty takes it away).
+    func setSignature(_ html: String) { call("wrenEditor.signature(html)", ["html": html]) }
     func saveSelection() { call("wrenEditor.save()") }
 
     func link(_ text: String) {

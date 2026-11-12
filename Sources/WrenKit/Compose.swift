@@ -89,6 +89,8 @@ public struct Draft: Codable, Hashable, Sendable, Identifiable {
         var d = Draft(accountId: account, identityId: identity?.id)
         d.to = to
         d.body = signatureBlock(identity)
+        let signature = signatureHTML(identity)
+        if !signature.isEmpty { d.html = signature }
         return d
     }
 
@@ -109,7 +111,9 @@ public struct Draft: Codable, Hashable, Sendable, Identifiable {
             case "cc": d.cc = value
             case "bcc": d.bcc = value
             case "subject": d.subject = value
-            case "body": d.body = value + d.body
+            case "body":
+                d.body = value + d.body
+                d.html = d.html.map { html(fromText: value) + $0 }
             default: break
             }
         }
@@ -139,7 +143,7 @@ public struct Draft: Codable, Hashable, Sendable, Identifiable {
         let who = email.from?.first?.displayName ?? "someone"
         let when = email.receivedAt.map { "On \($0.formatted(date: .abbreviated, time: .shortened)), " } ?? ""
         d.body = signatureBlock(identity) + "\n\n\(when)\(who) wrote:\n\n" + quote(email.text)
-        d.html = html(fromText: signatureBlock(identity)) + quoted(email, intro: "\(when)\(who) wrote:")
+        d.html = signatureHTML(identity) + quoted(email, intro: "\(when)\(who) wrote:")
         return d
     }
 
@@ -153,7 +157,7 @@ public struct Draft: Codable, Hashable, Sendable, Identifiable {
         if let date = email.receivedAt { header.append("Date: " + date.formatted(date: .long, time: .shortened)) }
         if let to = email.to, !to.isEmpty { header.append("To: " + to.map(\.formatted).joined(separator: ", ")) }
         d.body = signatureBlock(identity) + "\n\n" + header.joined(separator: "\n") + "\n\n" + email.text
-        d.html = html(fromText: signatureBlock(identity) + "\n\n" + header.joined(separator: "\n")) + quoted(email, intro: nil)
+        d.html = signatureHTML(identity) + html(fromText: "\n\n" + header.joined(separator: "\n")) + quoted(email, intro: nil)
         // Wren copies another message's attachments into the draft, so they're sent along without downloading them.
         d.files = File.list(email.attachments)
         return d
@@ -176,6 +180,46 @@ public struct Draft: Codable, Hashable, Sendable, Identifiable {
     private static func signatureBlock(_ identity: Identity?) -> String {
         guard let sig = identity?.textSignature?.trimmingCharacters(in: .whitespacesAndNewlines), !sig.isEmpty else { return "" }
         return "\n\n" + sig
+    }
+
+    /// The signature for the editor, below where you type: Wren's HTML one (links and formatting kept), or the plain
+    /// one. It sits in its own element so choosing another From address can swap it (`signatureInner`).
+    public static func signatureHTML(_ identity: Identity?) -> String {
+        let inner = signatureInner(identity)
+        return inner.isEmpty ? "" : "<br><br><div class=\"wren-signature\">\(inner)</div>"
+    }
+
+    /// What goes inside the signature element ("" for none), tracking pictures taken out as from any mail.
+    public static func signatureInner(_ identity: Identity?) -> String {
+        if let rich = identity?.htmlSignature?.trimmingCharacters(in: .whitespacesAndNewlines), !rich.isEmpty, !plainText(fromHTML: rich).trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || rich.contains("<img") {
+            return Trackers.strip(rich).html
+        }
+        guard let sig = identity?.textSignature?.trimmingCharacters(in: .whitespacesAndNewlines), !sig.isEmpty else { return "" }
+        return html(fromText: sig)
+    }
+
+    /// What you wrote yourself: the message without the quote it answers or forwards, and without the signature.
+    public var ownText: String {
+        if let html {
+            var mine = html
+            for marker in ["<div class=\"wren-quote\"", "<div class=\"wren-signature\""] {
+                if let r = mine.range(of: marker) { mine = String(mine[..<r.lowerBound]) }
+            }
+            return plainText(fromHTML: mine)
+        }
+        // Plain text: up to the quote's "wrote:" line or "Begin forwarded message:", leaving out quoted lines.
+        var lines: [Substring] = []
+        for line in body.split(separator: "\n", omittingEmptySubsequences: false) {
+            if line.hasPrefix("Begin forwarded message:") || (line.hasSuffix("wrote:") && line.hasPrefix("On ")) { break }
+            if !line.hasPrefix(">") { lines.append(line) }
+        }
+        return lines.joined(separator: "\n")
+    }
+
+    /// Whether what you wrote talks about an attachment ("attached", "see attachment", "enclosed") while nothing is
+    /// attached: the reminder Mail gives before sending.
+    public var forgotAttachment: Bool {
+        files.isEmpty && ownText.range(of: #"(?i)\b(attach(ed|ing|ment|ments)?|enclosed|pfa)\b"#, options: .regularExpression) != nil
     }
 
     /// Plain text as editor HTML: escaped, with line breaks kept.

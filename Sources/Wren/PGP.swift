@@ -283,8 +283,8 @@ extension MailStore {
     }
 
     /// An encrypted or signed message, decrypted or checked against the keys Wren knows for its sender.
-    func openPGP(_ email: Email, _ kind: PGPKind) async throws -> PGP.Opened {
-        guard let place = threadPlace, let login = login(place.login) else { throw NotConnected() }
+    func openPGP(_ email: Email, _ kind: PGPKind, in where: MailboxRef? = nil) async throws -> PGP.Opened {
+        guard let place = `where` ?? threadPlace, let login = login(place.login) else { throw NotConnected() }
         let pgp = PGP.shared
         var senderKeys: [String] = []
         if let sender = email.from?.first?.email.lowercased() {
@@ -299,11 +299,11 @@ extension MailStore {
             return try await pgp.verifyCleartext(armored, senderKeys: senderKeys)
         case .encryptedMIME:
             guard let part = kind.part(of: email) else { throw PGP.Failure("The encrypted part couldn’t be found") }
-            return try await pgp.decryptMIME(download(part), login: login.id, senderKeys: senderKeys)
+            return try await pgp.decryptMIME(download(part, in: place), login: login.id, senderKeys: senderKeys)
         case .signedMIME:
             guard let part = kind.part(of: email), let blob = email.blobId else { throw PGP.Failure("The signature couldn’t be found") }
-            let raw = try await download(BodyPart(blobId: blob, size: 0, name: "message.eml", type: "message/rfc822"))
-            let signature = String(decoding: try await download(part), as: UTF8.self)
+            let raw = try await download(BodyPart(blobId: blob, size: 0, name: "message.eml", type: "message/rfc822"), in: place)
+            let signature = String(decoding: try await download(part, in: place), as: UTF8.self)
             return try await pgp.verifySignedMIME(raw: raw, signature: signature, senderKeys: senderKeys)
         }
     }

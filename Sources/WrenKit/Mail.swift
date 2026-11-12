@@ -14,6 +14,25 @@ extension JMAPClient {
         return try (r[0]["list"] ?? []).decode([Mailbox].self).sorted { ($0.sortOrder, $0.name) < ($1.sortOrder, $1.name) }
     }
 
+    /// A new label (Wren's mailboxes without a role); returns its id.
+    public func createLabel(_ name: String, account: String) async throws -> String {
+        let r = try await call([("Mailbox/set", ["accountId": .string(account), "create": ["label": ["name": .string(name)]]])])
+        try checkSet(r[0])
+        guard let id = r[0]["created"]?["label"]?["id"]?.string else { throw JMAPError.badResponse }
+        return id
+    }
+
+    public func renameLabel(_ id: String, to name: String, account: String) async throws {
+        let r = try await call([("Mailbox/set", ["accountId": .string(account), "update": [id: ["name": .string(name)]]])])
+        try checkSet(r[0])
+    }
+
+    /// Delete a label. Its mail stays where it is (in its folder); only the label comes off.
+    public func deleteLabel(_ id: String, account: String) async throws {
+        let r = try await call([("Mailbox/set", ["accountId": .string(account), "destroy": [.string(id)], "onDestroyRemoveEmails": true])])
+        try checkSet(r[0])
+    }
+
     public func identities(account: String) async throws -> [Identity] {
         let r = try await call([("Identity/get", ["accountId": .string(account)])])
         return try (r[0]["list"] ?? []).decode([Identity].self)
@@ -21,8 +40,10 @@ extension JMAPClient {
 
     /// The newest `limit` conversations in a mailbox, optionally matching a search, and how many there are in all.
     /// With `unreadOnly`, just the conversations with unread mail there.
-    public func conversations(account: String, mailbox: String, search: String = "", unreadOnly: Bool = false, limit: Int) async throws -> (list: [Conversation], total: Int) {
-        var filter: [String: JSON] = ["inMailbox": .string(mailbox)]
+    /// With `mailbox` nil, every mailbox but the ones in `excluding` (searching all mail, leaving out Trash and Junk).
+    public func conversations(account: String, mailbox: String?, excluding: [String] = [], search: String = "", unreadOnly: Bool = false, limit: Int) async throws -> (list: [Conversation], total: Int) {
+        var filter: [String: JSON] = [:]
+        if let mailbox { filter["inMailbox"] = .string(mailbox) } else if !excluding.isEmpty { filter["inMailboxOtherThan"] = .array(excluding.map(JSON.string)) }
         if unreadOnly { filter["notKeyword"] = "$seen" }
         let words = search.trimmingCharacters(in: .whitespacesAndNewlines)
         if !words.isEmpty { filter["text"] = .string(words) }
@@ -50,6 +71,32 @@ extension JMAPClient {
             if let id = s["emailId"]?.string { snippets[id] = SearchSnippet(subject: s["subject"]?.string, preview: s["preview"]?.string) }
         }
         return (emails.map { Conversation(email: $0, count: counts[$0.threadId] ?? 1, snippet: snippets[$0.id]) }, r[0]["total"]?.int ?? emails.count)
+    }
+
+    /// What changed in an account's mail since a state (Email/changes, RFC 8620 5.2), following `hasMoreChanges` to
+    /// the end. Throws `cannotCalculateChanges` when the state is too old; then load again from the start.
+    public func emailChanges(account: String, since state: String) async throws -> EmailChanges {
+        var out = EmailChanges(newState: state)
+        var since = state
+        for _ in 0..<20 {
+            let r = try await call([("Email/changes", ["accountId": .string(account), "sinceState": .string(since), "maxChanges": 500])])
+            out.created += (r[0]["created"]?.array ?? []).compactMap(\.string)
+            out.updated += (r[0]["updated"]?.array ?? []).compactMap(\.string)
+            out.destroyed += (r[0]["destroyed"]?.array ?? []).compactMap(\.string)
+            guard let next = r[0]["newState"]?.string else { throw JMAPError.badResponse }
+            since = next
+            out.newState = next
+            if r[0]["hasMoreChanges"]?.bool != true { return out.tidied() }
+        }
+        // Far too much changed to follow one by one.
+        throw JMAPError.method("cannotCalculateChanges", nil)
+    }
+
+    /// Some messages as the list shows them (no bodies).
+    public func emails(_ ids: [String], account: String) async throws -> [Email] {
+        guard !ids.isEmpty else { return [] }
+        let r = try await call([("Email/get", ["accountId": .string(account), "ids": .array(ids.map(JSON.string)), "properties": listProperties])])
+        return try (r[0]["list"] ?? []).decode([Email].self)
     }
 
     /// Every message of a conversation, oldest first, with bodies.
@@ -176,7 +223,10 @@ extension JMAPClient {
 
     /// Send a saved draft now, or hold it until `sendAt` (scheduled send), and file it in Sent. With `privateLinkDays`
     /// (1, 7 or 30; Wren's extension) it goes out as a private link that stops working after that many days.
-    public func submit(emailId: String, account: String, identity: Identity, recipients: [EmailAddress], sendAt: Date? = nil, privateLinkDays: Int? = nil, draftsMailbox: String, sentMailbox: String) async throws {
+    /// Returns the submission, which can be cancelled while it's held (`undoStatus` "pending"): a scheduled send, or one
+    /// held for a few seconds so it can be undone.
+    @discardableResult
+    public func submit(emailId: String, account: String, identity: Identity, recipients: [EmailAddress], sendAt: Date? = nil, privateLinkDays: Int? = nil, draftsMailbox: String, sentMailbox: String) async throws -> Submission {
         var submission: [String: JSON] = ["identityId": .string(identity.id), "emailId": .string(emailId)]
         if let privateLinkDays { submission["privateLinkDays"] = .number(Double(privateLinkDays)) }
         if let sendAt {
@@ -193,7 +243,89 @@ extension JMAPClient {
             ]),
         ])
         try checkSet(r[0])
+        guard let created = r[0]["created"]?["send"], let id = created["id"]?.string else { throw JMAPError.badResponse }
+        return Submission(id: id, emailId: emailId, sendAt: created["sendAt"]?.string.flatMap(parseUTCDate), undoStatus: created["undoStatus"]?.string ?? "final")
     }
+
+    /// Messages waiting to be sent: scheduled, or held for undo, soonest first, with who they're to and their subject.
+    public func pendingSubmissions(account: String) async throws -> [Submission] {
+        let a = JSON.string(account)
+        let r = try await call([
+            ("EmailSubmission/query", ["accountId": a, "filter": ["undoStatus": "pending"]]),
+            ("EmailSubmission/get", ["accountId": a, "#ids": ["resultOf": "0", "name": "EmailSubmission/query", "path": "/ids"],
+                                     "properties": ["emailId", "threadId", "sendAt", "undoStatus"]]),
+            ("Email/get", ["accountId": a, "#ids": ["resultOf": "1", "name": "EmailSubmission/get", "path": "/list/*/emailId"],
+                           "properties": ["subject", "to", "cc", "bcc"]]),
+        ])
+        var emails: [String: JSON] = [:]
+        for e in r[2]["list"]?.array ?? [] { if let id = e["id"]?.string { emails[id] = e } }
+        return (r[1]["list"]?.array ?? []).compactMap { s -> Submission? in
+            guard let id = s["id"]?.string, let emailId = s["emailId"]?.string else { return nil }
+            var sub = Submission(id: id, emailId: emailId, sendAt: s["sendAt"]?.string.flatMap(parseUTCDate), undoStatus: s["undoStatus"]?.string ?? "pending")
+            sub.threadId = s["threadId"]?.string
+            if let e = emails[emailId] {
+                sub.subject = e["subject"]?.string
+                sub.to = ["to", "cc", "bcc"].flatMap { (try? (e[$0] ?? []).decode([EmailAddress].self)) ?? [] }
+            }
+            return sub
+        }.sorted { ($0.sendAt ?? .distantFuture) < ($1.sendAt ?? .distantFuture) }
+    }
+
+    /// Stop a held message from going out. It's back in Drafts; returns its id there (taking Wren's domain footer
+    /// off makes it a new email). Throws `cannotUnsend` once it has gone.
+    public func cancel(submission id: String, account: String) async throws -> String? {
+        let a = JSON.string(account)
+        let r = try await call([
+            ("EmailSubmission/set", ["accountId": a, "update": [id: ["undoStatus": "canceled"]]]),
+            ("EmailSubmission/get", ["accountId": a, "ids": [.string(id)], "properties": ["emailId"]]),
+        ])
+        try checkSet(r[0])
+        return r[1]["list"]?.array?.first?["emailId"]?.string
+    }
+}
+
+/// Messages made, changed and deleted since a state.
+public struct EmailChanges: Sendable, Equatable {
+    public var created: [String] = []
+    public var updated: [String] = []
+    public var destroyed: [String] = []
+    public var newState: String
+
+    public var isEmpty: Bool { created.isEmpty && updated.isEmpty && destroyed.isEmpty }
+
+    /// Across several pages an id can show up more than once: made then changed is made, anything deleted is deleted.
+    func tidied() -> EmailChanges {
+        func unique(_ ids: [String]) -> [String] {
+            var seen = Set<String>()
+            return ids.filter { seen.insert($0).inserted }
+        }
+        var out = self
+        let gone = Set(destroyed), made = Set(created)
+        out.created = unique(created.filter { !gone.contains($0) })
+        out.updated = unique(updated.filter { !gone.contains($0) && !made.contains($0) })
+        out.destroyed = unique(destroyed)
+        return out
+    }
+}
+
+/// A message handed to the server to send (RFC 8621 7). While `undoStatus` is "pending" it can still be cancelled.
+public struct Submission: Sendable, Hashable, Identifiable {
+    public var id: String
+    public var emailId: String
+    public var threadId: String?
+    public var sendAt: Date?
+    public var undoStatus: String
+    public var subject: String?
+    public var to: [EmailAddress] = []
+
+    public init(id: String, emailId: String, sendAt: Date?, undoStatus: String) {
+        self.id = id
+        self.emailId = emailId
+        self.sendAt = sendAt
+        self.undoStatus = undoStatus
+    }
+
+    public var isPending: Bool { undoStatus == "pending" }
 }
 
 // MARK: Wren's extension

@@ -18,7 +18,24 @@ struct MainView: View {
             ReaderPane()
         }
         .searchable(text: $store.search, placement: .toolbar, prompt: "Search")
+        .searchScopes($store.searchScope) {
+            Text("All Mailboxes").tag(MailStore.SearchScope.everywhere)
+            Text(store.mailbox(store.selectedMailbox)?.name ?? "This Mailbox").tag(MailStore.SearchScope.mailbox)
+        }
         .onAppear { store.undoManager = undoManager }
+        .sheet(item: $store.labelEditor) { LabelSheet(edit: $0) }
+        .confirmationDialog(
+            "Delete the label “\(store.mailbox(store.confirmingDeleteLabel)?.name ?? "")”?",
+            isPresented: Binding(get: { store.confirmingDeleteLabel != nil }, set: { if !$0 { store.confirmingDeleteLabel = nil } }),
+            titleVisibility: .visible,
+            presenting: store.confirmingDeleteLabel
+        ) { ref in
+            Button("Delete Label", role: .destructive) { Task { await store.deleteLabel(ref) } }
+            Button("Cancel", role: .cancel) {}
+        } message: { _ in
+            Text("Its mail stays where it is; only the label comes off.")
+        }
+        .sheet(isPresented: $store.showingScheduled) { ScheduledView() }
         .alert("Something went wrong", isPresented: Binding(get: { store.alert != nil }, set: { if !$0 { store.alert = nil } })) {
             Button("OK", role: .cancel) {}
         } message: {
@@ -70,6 +87,7 @@ struct Sidebar: View {
                             let ref = MailboxRef(login: login.id, account: account.id, mailbox: box.id)
                             MailboxRow(mailbox: box).tag(ref)
                                 .contextMenu { MailboxActions(ref: ref) }
+                                .modifier(DropConversations(ref: ref))
                         }
                     }
                     let labels = boxes.filter { $0.role == nil }
@@ -79,6 +97,7 @@ struct Sidebar: View {
                                 let ref = MailboxRef(login: login.id, account: account.id, mailbox: box.id)
                                 MailboxRow(mailbox: box).tag(ref)
                                     .contextMenu { MailboxActions(ref: ref) }
+                                    .modifier(DropConversations(ref: ref))
                             }
                         }
                     }
@@ -87,19 +106,27 @@ struct Sidebar: View {
         }
         .listStyle(.sidebar)
         .safeAreaInset(edge: .bottom) {
-            if !notes.isEmpty {
-                VStack(alignment: .leading, spacing: 8) {
-                    ForEach(notes, id: \.text) { note in
-                        Label(note.text, systemImage: note.icon)
-                            .lineLimit(3)
-                            .help(note.help)
-                    }
-                }
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(10)
+            VStack(spacing: 0) {
+                if let pending = store.pendingSend { UndoSendBar(pending: pending) }
+                notesView
             }
+        }
+    }
+
+    @ViewBuilder
+    private var notesView: some View {
+        if !notes.isEmpty {
+            VStack(alignment: .leading, spacing: 8) {
+                ForEach(notes, id: \.text) { note in
+                    Label(note.text, systemImage: note.icon)
+                        .lineLimit(3)
+                        .help(note.help)
+                }
+            }
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(10)
         }
     }
 
@@ -115,11 +142,111 @@ struct Sidebar: View {
             let who = store.logins.count > 1 ? "\(login.username): " : ""
             var notes: [Note] = []
             if let problem = login.problem { notes.append(Note(text: who + problem, icon: "exclamationmark.triangle", help: problem)) }
+            let waiting = store.queuedCount(login)
+            if waiting > 0 {
+                notes.append(Note(text: who + (waiting == 1 ? "1 change" : "\(waiting) changes") + " waiting for the connection", icon: "arrow.triangle.2.circlepath",
+                                  help: "What you did offline is sent to Wren when it can be reached again."))
+            }
             if let quota = login.quota, quota.fraction >= 0.9 {
                 let full = quota.fraction.formatted(.percent.precision(.fractionLength(0)))
                 notes.append(Note(text: who + "Storage is \(full) full. Delete large messages to keep getting mail.", icon: "externaldrive.badge.exclamationmark", help: storageText(quota)))
             }
             return notes
+        }
+    }
+}
+
+/// A message that was just sent, held for a few seconds: Undo stops it and opens it again.
+struct UndoSendBar: View {
+    let pending: PendingSend
+    @Environment(MailStore.self) private var store
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "paperplane")
+            // Counts down to when it goes.
+            Text(timerInterval: Date.now...max(Date.now, pending.until), countsDown: true)
+                .monospacedDigit()
+                .frame(width: 34, alignment: .leading)
+            Text(pending.draft.subject.isEmpty ? "Sending" : "Sending “\(pending.draft.subject)”")
+                .lineLimit(1)
+                .truncationMode(.middle)
+            Spacer(minLength: 4)
+            Button("Undo") { Task { await store.undoSend(pending) } }
+                .controlSize(.small)
+        }
+        .font(.callout)
+        .padding(10)
+        .background(.quaternary.opacity(0.6), in: RoundedRectangle(cornerRadius: 8))
+        .padding(8)
+        .transition(.move(edge: .bottom).combined(with: .opacity))
+        .accessibilityElement(children: .combine)
+        .accessibilityAction(named: "Undo Send") { Task { await store.undoSend(pending) } }
+    }
+}
+
+/// Conversations dragged from the list onto a sidebar mailbox: moved there, or labelled.
+struct DropConversations: ViewModifier {
+    let ref: MailboxRef
+    @Environment(MailStore.self) private var store
+    @State private var targeted = false
+
+    func body(content: Content) -> some View {
+        content
+            .dropDestination(for: String.self) { items, _ in
+                let ids = MailStore.dropped(items)
+                guard !ids.isEmpty, store.canDrop(on: ref) else { return false }
+                Task { await store.drop(ids, on: ref) }
+                return true
+            } isTargeted: { targeted = $0 && store.canDrop(on: ref) }
+            .listRowBackground(targeted ? RoundedRectangle(cornerRadius: 5).fill(Color.accentColor.opacity(0.25)) : nil)
+    }
+}
+
+/// Naming a new label, or renaming one.
+struct LabelSheet: View {
+    let edit: LabelEdit
+    @Environment(MailStore.self) private var store
+    @Environment(\.dismiss) private var dismiss
+    @State private var name = ""
+    @State private var working = false
+    @State private var error: String?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text(edit.label == nil ? "New Label" : "Rename Label").font(.headline)
+            TextField("Name", text: $name)
+                .textFieldStyle(.roundedBorder)
+                .onSubmit(save)
+            if let error {
+                Text(error).font(.callout).foregroundStyle(.red)
+            }
+            HStack {
+                Spacer()
+                Button("Cancel", role: .cancel) { dismiss() }
+                    .keyboardShortcut(.cancelAction)
+                Button(edit.label == nil ? "Create" : "Rename", action: save)
+                    .keyboardShortcut(.defaultAction)
+                    .disabled(working || name.trimmingCharacters(in: .whitespaces).isEmpty || name == edit.name)
+            }
+        }
+        .padding(20)
+        .frame(width: 320)
+        .onAppear { name = edit.name }
+    }
+
+    private func save() {
+        guard !working, !name.trimmingCharacters(in: .whitespaces).isEmpty else { return }
+        working = true
+        error = nil
+        Task {
+            do {
+                try await store.saveLabel(edit, name: name)
+                dismiss()
+            } catch {
+                self.error = error.localizedDescription
+            }
+            working = false
         }
     }
 }
@@ -137,6 +264,14 @@ struct MailboxActions: View {
             Divider()
             Button(role == "trash" ? "Empty Trash…" : "Empty Junk…") { store.confirmingEmpty = ref }
                 .disabled((box?.totalEmails ?? 0) == 0)
+        }
+        if ref != .allInboxes {
+            Divider()
+            Button("New Label…") { store.labelEditor = LabelEdit(login: ref.login, account: ref.account) }
+            if let box, box.role == nil {
+                Button("Rename Label…") { store.labelEditor = LabelEdit(login: ref.login, account: ref.account, label: box.id, name: box.name) }
+                Button("Delete Label…") { store.confirmingDeleteLabel = ref }
+            }
         }
     }
 }
