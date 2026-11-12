@@ -49,6 +49,15 @@ struct WrenApp: App {
             SettingsView()
                 .environment(store)
         }
+
+        // Opened from Wren → Admin Panel… (only for admins and helpdesk staff), so not listed in the Window menu.
+        Window("Admin Panel", id: "admin") {
+            AdminWindow()
+                .environment(store)
+        }
+        .defaultSize(width: 1080, height: 700)
+        .commandsRemoved()
+        .handlesExternalEvents(matching: [])
     }
 }
 
@@ -164,6 +173,12 @@ struct MailCommands: Commands {
             Button("Open in New Window") { if let id = selection.first { store.openInWindow(id) } }
                 .keyboardShortcut("o")
                 .disabled(selection.count != 1)
+        }
+        CommandGroup(after: .appSettings) {
+            if store.logins.contains(where: { $0.adminRole != nil }) {
+                Button("Admin Panel…") { openWindow(id: "admin") }
+                    .keyboardShortcut("a", modifiers: [.command, .option])
+            }
         }
         CommandGroup(replacing: .printItem) { PrintCommand(store: store) }
         CommandGroup(after: .toolbar) { ReaderTextSize() }

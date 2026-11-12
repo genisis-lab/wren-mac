@@ -208,6 +208,9 @@ struct ComposeView: View {
             let list = identities
             let before = Draft.signatureInner(list.first { $0.id == old })
             let after = Draft.signatureInner(list.first { $0.id == new })
+            // A reply or forward started without one (Settings → Signatures) doesn't get one now.
+            let html = draft.html ?? ""
+            if html.contains("<div class=\"wren-quote\""), !html.contains("<div class=\"wren-signature\"") { return }
             if before != after { editor.setSignature(after) }
         }
         .task {

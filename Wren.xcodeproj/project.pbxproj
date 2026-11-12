@@ -16,6 +16,7 @@
 		2E9D20277EE582B29C8875F4 /* noble LICENSE (MIT).txt in Resources */ = {isa = PBXBuildFile; fileRef = 0CF6EF3EBAA57B99052E7FFA /* noble LICENSE (MIT).txt */; };
 		2EB989950F7B4A31FB495F39 /* ComposeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5958E6A8FF9CC3287A6B0C5 /* ComposeView.swift */; };
 		39C746F7CF141AF231E79482 /* WrenWidget.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = F1BCD07307879B08E2697B2C /* WrenWidget.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		4719F34802592B4590BD60F7 /* SignatureSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = 92B118873CBA0FAEB5A1AEE9 /* SignatureSettings.swift */; };
 		49F466305122589001EA79E8 /* InviteCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = 81B42B8CAA8D231311691A5F /* InviteCard.swift */; };
 		4C310DC5C7C74FC0EEAE56B6 /* Demo.swift in Sources */ = {isa = PBXBuildFile; fileRef = AC706752F0F219CB8D9CCB84 /* Demo.swift */; };
 		52C16A03F29CA6F46A2B9A2C /* UnreadMail.swift in Sources */ = {isa = PBXBuildFile; fileRef = A3D34C60B8A69FE2104BE560 /* UnreadMail.swift */; };
@@ -33,6 +34,7 @@
 		902CB540957C56464BE82E99 /* OpenPGP.js LICENSE (LGPL-3.0).txt in Resources */ = {isa = PBXBuildFile; fileRef = 86746A82D57839174F40D61C /* OpenPGP.js LICENSE (LGPL-3.0).txt */; };
 		9617B3F23E608D0FC5D24F92 /* Updates.swift in Sources */ = {isa = PBXBuildFile; fileRef = ABEC626D53C7A267F87F52BB /* Updates.swift */; };
 		9757F2B6222DFF04ECDCC030 /* ConversationWindow.swift in Sources */ = {isa = PBXBuildFile; fileRef = C9D3AC8891C097B13FDCA597 /* ConversationWindow.swift */; };
+		97F91DCC9CD930AE5BC06CA5 /* AdminPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 76D15A925126463D0E10B927 /* AdminPanel.swift */; };
 		9F07A6D8FDE147AB3816E17E /* pgp.html in Resources */ = {isa = PBXBuildFile; fileRef = 7C78688BEF761F0EB27D30C8 /* pgp.html */; };
 		A71D16442DC801833555EE39 /* ScheduledView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 13401F1BE3909B1D5DCF8609 /* ScheduledView.swift */; };
 		AE730F455432D94B5411436E /* Spotlight.swift in Sources */ = {isa = PBXBuildFile; fileRef = BA3BFA6A524076149F0CF248 /* Spotlight.swift */; };
@@ -96,11 +98,13 @@
 		6468329ED84FEB4CC050267D /* MailStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MailStore.swift; sourceTree = "<group>"; };
 		6F4623EAE5608CCA487BB943 /* wren-mac */ = {isa = PBXFileReference; lastKnownFileType = folder; name = "wren-mac"; path = .; sourceTree = SOURCE_ROOT; };
 		722584B727843243C9A10E33 /* GPL-3.0.txt */ = {isa = PBXFileReference; lastKnownFileType = text; path = "GPL-3.0.txt"; sourceTree = "<group>"; };
+		76D15A925126463D0E10B927 /* AdminPanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AdminPanel.swift; sourceTree = "<group>"; };
 		771DF2C89DAF5F2DD43F1864 /* Wren.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Wren.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		7C78688BEF761F0EB27D30C8 /* pgp.html */ = {isa = PBXFileReference; lastKnownFileType = text.html; path = pgp.html; sourceTree = "<group>"; };
 		81B42B8CAA8D231311691A5F /* InviteCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InviteCard.swift; sourceTree = "<group>"; };
 		86746A82D57839174F40D61C /* OpenPGP.js LICENSE (LGPL-3.0).txt */ = {isa = PBXFileReference; lastKnownFileType = text; path = "OpenPGP.js LICENSE (LGPL-3.0).txt"; sourceTree = "<group>"; };
 		86D356DA16B86D69B1A8DFAA /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		92B118873CBA0FAEB5A1AEE9 /* SignatureSettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SignatureSettings.swift; sourceTree = "<group>"; };
 		9700900A158E1EDBE3A8CE48 /* WrenShare.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = WrenShare.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		97312053C75E291AA8E2D894 /* PGP.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PGP.swift; sourceTree = "<group>"; };
 		A0C821E8ADA0F57FFE65CCE8 /* Keychain.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Keychain.swift; sourceTree = "<group>"; };
@@ -141,6 +145,7 @@
 		29C9D51C1FDAF94B88E71E92 /* Wren */ = {
 			isa = PBXGroup;
 			children = (
+				76D15A925126463D0E10B927 /* AdminPanel.swift */,
 				86D356DA16B86D69B1A8DFAA /* Assets.xcassets */,
 				D5958E6A8FF9CC3287A6B0C5 /* ComposeView.swift */,
 				A584F64CF97D561783E36203 /* ConversationFind.swift */,
@@ -161,6 +166,7 @@
 				13401F1BE3909B1D5DCF8609 /* ScheduledView.swift */,
 				A6D840FC08F84FC0AB49A6E9 /* SecureMessage.swift */,
 				5AE9374267B2F608CB3509EF /* SettingsView.swift */,
+				92B118873CBA0FAEB5A1AEE9 /* SignatureSettings.swift */,
 				D8640C94B63DEACBFF9889BF /* SignInView.swift */,
 				BA3BFA6A524076149F0CF248 /* Spotlight.swift */,
 				ABEC626D53C7A267F87F52BB /* Updates.swift */,
@@ -399,6 +405,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				97F91DCC9CD930AE5BC06CA5 /* AdminPanel.swift in Sources */,
 				2EB989950F7B4A31FB495F39 /* ComposeView.swift in Sources */,
 				00C1490DDB8BE3A1EA7C1724 /* ConversationFind.swift in Sources */,
 				8CF3B03504E2BD1B9D15FFD1 /* ConversationList.swift in Sources */,
@@ -419,6 +426,7 @@
 				F7EAF9C13BF7C142A0CCE4A7 /* SecureMessage.swift in Sources */,
 				CB08B768EE2D7CE08A546F80 /* SettingsView.swift in Sources */,
 				75887D874B944C3A8C77DDF8 /* SignInView.swift in Sources */,
+				4719F34802592B4590BD60F7 /* SignatureSettings.swift in Sources */,
 				AE730F455432D94B5411436E /* Spotlight.swift in Sources */,
 				52C16A03F29CA6F46A2B9A2C /* UnreadMail.swift in Sources */,
 				9617B3F23E608D0FC5D24F92 /* Updates.swift in Sources */,

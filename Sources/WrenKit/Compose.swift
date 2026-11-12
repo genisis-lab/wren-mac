@@ -121,8 +121,9 @@ public struct Draft: Codable, Hashable, Sendable, Identifiable {
         return d
     }
 
-    /// A reply to `email`, or a reply to everyone on it, from the identity it was sent to.
-    public static func reply(to email: Email, all: Bool, account: String, identities: [Identity]) -> Draft {
+    /// A reply to `email`, or a reply to everyone on it, from the identity it was sent to. `signature`: whether
+    /// replies get one (Wren's "Insert signature in replies and forwards").
+    public static func reply(to email: Email, all: Bool, account: String, identities: [Identity], signature: Bool = true) -> Draft {
         let mine = Set(identities.map { $0.email.lowercased() })
         let identity = Identity.best(for: email, among: identities)
         var d = Draft(accountId: account, identityId: identity?.id)
@@ -142,12 +143,13 @@ public struct Draft: Codable, Hashable, Sendable, Identifiable {
         d.references = email.messageId.map { (email.references ?? []) + $0 }
         let who = email.from?.first?.displayName ?? "someone"
         let when = email.receivedAt.map { "On \($0.formatted(date: .abbreviated, time: .shortened)), " } ?? ""
-        d.body = signatureBlock(identity) + "\n\n\(when)\(who) wrote:\n\n" + quote(email.text)
-        d.html = signatureHTML(identity) + quoted(email, intro: "\(when)\(who) wrote:")
+        let sigIdentity = signature ? identity : nil
+        d.body = signatureBlock(sigIdentity) + "\n\n\(when)\(who) wrote:\n\n" + quote(email.text)
+        d.html = signatureHTML(sigIdentity) + quoted(email, intro: "\(when)\(who) wrote:")
         return d
     }
 
-    public static func forward(_ email: Email, account: String, identities: [Identity]) -> Draft {
+    public static func forward(_ email: Email, account: String, identities: [Identity], signature: Bool = true) -> Draft {
         let identity = Identity.best(for: email, among: identities)
         var d = Draft(accountId: account, identityId: identity?.id)
         d.subject = prefixed("Fwd:", email.subject)
@@ -156,8 +158,9 @@ public struct Draft: Codable, Hashable, Sendable, Identifiable {
         header.append("Subject: " + (email.subject ?? ""))
         if let date = email.receivedAt { header.append("Date: " + date.formatted(date: .long, time: .shortened)) }
         if let to = email.to, !to.isEmpty { header.append("To: " + to.map(\.formatted).joined(separator: ", ")) }
-        d.body = signatureBlock(identity) + "\n\n" + header.joined(separator: "\n") + "\n\n" + email.text
-        d.html = signatureHTML(identity) + html(fromText: "\n\n" + header.joined(separator: "\n")) + quoted(email, intro: nil)
+        let sigIdentity = signature ? identity : nil
+        d.body = signatureBlock(sigIdentity) + "\n\n" + header.joined(separator: "\n") + "\n\n" + email.text
+        d.html = signatureHTML(sigIdentity) + html(fromText: "\n\n" + header.joined(separator: "\n")) + quoted(email, intro: nil)
         // Wren copies another message's attachments into the draft, so they're sent along without downloading them.
         d.files = File.list(email.attachments)
         return d

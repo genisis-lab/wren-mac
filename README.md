@@ -42,6 +42,15 @@ mail apps have to be turned on in Wren (Admin → Settings & policies → Securi
 - Wren can be your default email app (Settings → General), so `mailto:` links open a new message
 - Out-of-office reply (Settings → Out of Office) and storage used (Settings → Account), with a
   warning in the sidebar when your mailbox is nearly full
+- Your name, signatures (one for all your addresses, or one for each, with formatting), which address
+  new mail is from, and whether replies and forwards get the signature (Settings → Signatures). These
+  are Wren's own settings, the same as in Settings on the web, so a change shows up in both
+- Settings → General: which account new mail is from when All Inboxes is showing, and whether new mail
+  shows a notification and plays a sound. Settings → Viewing: the size of message text
+- The admin panel for Wren's administrators and helpdesk staff (Wren → Admin Panel…, ⌥⌘A): an overview,
+  people (suspend, sign out, reset 2-step sign-in, reset and setup links, roles, sending, legal hold,
+  delete), invitations, the outgoing mail queue and the activity log. Domains, providers and server
+  settings stay in the admin panel on the web (Open on the Web)
 - Live updates over Wren's push stream, fetching only what changed, and reconnecting as soon as the Mac
   wakes or the network is back; a notification for new mail in your Inbox that opens
   the conversation when you click it, with Reply (type it right in the notification), Archive and
@@ -79,6 +88,15 @@ mail apps have to be turned on in Wren (Admin → Settings & policies → Securi
   Encrypted mail is shown without remote pictures, and drafts written with Encrypt on are saved encrypted.
 - Spotlight's index of your conversations stays on your Mac, and each account's entries are deleted
   when you remove the account.
+- The admin panel isn't opened by the app password. Unlocking it takes your account password (the one
+  for Wren on the web) and one second step: a code from your authenticator app, approving on the web by
+  typing the number the Mac shows (only from a browser signed in with 2-step sign-in or a passkey), or a
+  code emailed to your confirmed recovery address (never to the Wren mailbox, which this Mac can read).
+  The unlock is a token kept only in memory, usable only with this Mac's app password, and it ends after
+  15 minutes without use or an hour in all, when you close the window or choose Lock, and when the Mac
+  sleeps, its screen locks, Wren quits or the app password is revoked. Everything done there is in Wren's
+  activity log, marked as done from an app, and changes that can't be undone ask first. Wren's admin IP
+  allowlist and helpdesk limits apply as on the web.
 
 ## Building
 
