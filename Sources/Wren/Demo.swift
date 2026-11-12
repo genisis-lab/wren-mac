@@ -148,6 +148,7 @@ struct Demo: ViewModifier {
         await wait(2)
         await shoot("16-shortcut-sent", in: dir)
         log("unread in the Inboxes: \(store.unreadInInboxes)")
+        await newFeatures(dir)
         await richMail(dir)
 
         // A second sign-in: All Inboxes, and its own mailboxes in the sidebar.
@@ -166,6 +167,41 @@ struct Demo: ViewModifier {
             await shoot("11-settings-\(tab)", in: dir)
         }
         exit(0)
+    }
+
+    /// Sent back to the Inbox (where AppKit used to log a reentrant table operation), a conversation in its own
+    /// window with Find, a search of all mailboxes, Scheduled Messages and the label sheet.
+    private func newFeatures(_ dir: URL) async {
+        guard let inbox = store.inboxes.first else { return }
+        store.selectedMailbox = inbox
+        await until { store.currentRole == "inbox" && !store.conversations.isEmpty }
+        await wait(2)
+        if let lunch = store.conversations.first(where: { $0.count > 1 }) {
+            store.openInWindow(lunch.id)
+            await until { NSApp.windows.contains { $0.isVisible && $0.title.contains("Lunch") } }
+            await wait(2.5)
+            await shoot("17-conversation-window", in: dir)
+            NSApp.windows.filter { $0.isVisible && $0.title.contains("Lunch") && $0.title != "Wren" }.forEach { $0.close() }
+        }
+        store.searchScope = .everywhere
+        store.search = "lunch"
+        await until { store.searchingEverywhere && !store.conversations.isEmpty && !store.isLoading }
+        await wait(1.5)
+        await shoot("18-search-all-mailboxes", in: dir)
+        store.search = ""
+        store.searchScope = .mailbox
+        await wait(1)
+        store.showingScheduled = true
+        await wait(2)
+        await shoot("19-scheduled", in: dir)
+        store.showingScheduled = false
+        await wait(1)
+        store.labelEditor = LabelEdit(login: inbox.login, account: inbox.account, name: "Travel")
+        await wait(1.5)
+        await shoot("20-new-label", in: dir)
+        store.labelEditor = nil
+        await wait(1)
+        log("queued changes: \(store.queued.count)")
     }
 
     private func window(titled title: String) async -> NSWindow? {

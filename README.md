@@ -8,14 +8,25 @@ mail apps have to be turned on in Wren (Admin → Settings & policies → Securi
 - Several Wren accounts (Settings → Accounts), with All Inboxes at the top of the sidebar
 - Mailboxes, labels and shared mailboxes in the sidebar, with unread counts and a Dock badge
 - Opens with your mail showing, and shows what you've looked at when you're offline: the last list
-  of each mailbox and the 150 conversations you opened most recently are kept on your Mac
-- Conversations, search as you type with the matching words marked, and a reader that folds older messages
+  of each mailbox and the 150 conversations you opened most recently are kept on your Mac. What you
+  move, read, flag, label or snooze offline is sent when Wren can be reached again (even after quitting)
+- Conversations, search as you type with the matching words marked (in the mailbox you're looking at,
+  or All Mailboxes), and a reader that folds older messages
+- Double-click a conversation (or ⌘O) to open it in a window of its own; Print (⌘P); find words in a
+  conversation (⌘F, then ⌘G); Raw Source (⌥⌘U) shows a message exactly as it arrived; View → Bigger
+  and Smaller (⌘+, ⌘-) change the size of message text
 - Show only unread mail (⌘L, or the filter button above the list)
-- Archive, Trash, Junk, flag, read/unread, labels and snooze, from the toolbar, the Message
-  menu, swipes and right-click; moves can be undone with ⌘Z
-- Right-click a mailbox to mark everything in it as read, or to empty the Trash or Junk
+- Archive, Trash, Junk, Move to Inbox (and Move to), flag, read/unread, labels and snooze, from the
+  toolbar, the Message menu, swipes, right-click and VoiceOver's actions; moves can be undone with ⌘Z.
+  Drag conversations onto a mailbox or label in the sidebar
+- Right-click a mailbox to mark everything in it as read, or to empty the Trash or Junk; make, rename
+  and delete labels there too
 - Compose in its own window: reply, reply all, forward (with attachments), attach files (or drop
-  them on the window), send now or later; closing a window with changes saves it to Drafts
+  them on the window), send now or later. Drafts are saved every 30 seconds while you write, and when
+  the window closes. Your signature from Wren keeps its formatting and changes with the From address
+- Undo Send: a sent message waits a few seconds (Settings → General) so ⌘Z or the Undo bar can stop it.
+  Mailbox → Scheduled Messages… shows everything waiting to go out, to stop or change
+- A reminder before sending without a subject, or without an attachment you mention
 - Formatting as you write: bold, italic, underline (⌘B, ⌘I, ⌘U), links (⌘K), bulleted and numbered
   lists and quotes. It's sent as HTML with a plain-text copy, and replies keep the quoted message's HTML
 - Calendar invitations show a card with what, when, where and who's asking, and Accept, Maybe and
@@ -31,7 +42,8 @@ mail apps have to be turned on in Wren (Admin → Settings & policies → Securi
 - Wren can be your default email app (Settings → General), so `mailto:` links open a new message
 - Out-of-office reply (Settings → Out of Office) and storage used (Settings → Account), with a
   warning in the sidebar when your mailbox is nearly full
-- Live updates over Wren's push stream, and a notification for new mail in your Inbox that opens
+- Live updates over Wren's push stream, fetching only what changed, and reconnecting as soon as the Mac
+  wakes or the network is back; a notification for new mail in your Inbox that opens
   the conversation when you click it, with Reply (type it right in the notification), Archive and
   Mark as Read buttons; a notification goes away once its mail is read or filed, here or anywhere else
 - Conversations you've looked at show up in Spotlight (sender, subject and preview) and open in Wren
