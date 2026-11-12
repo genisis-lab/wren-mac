@@ -31,6 +31,7 @@
 		902CB540957C56464BE82E99 /* OpenPGP.js LICENSE (LGPL-3.0).txt in Resources */ = {isa = PBXBuildFile; fileRef = 86746A82D57839174F40D61C /* OpenPGP.js LICENSE (LGPL-3.0).txt */; };
 		9617B3F23E608D0FC5D24F92 /* Updates.swift in Sources */ = {isa = PBXBuildFile; fileRef = ABEC626D53C7A267F87F52BB /* Updates.swift */; };
 		9F07A6D8FDE147AB3816E17E /* pgp.html in Resources */ = {isa = PBXBuildFile; fileRef = 7C78688BEF761F0EB27D30C8 /* pgp.html */; };
+		A71D16442DC801833555EE39 /* ScheduledView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 13401F1BE3909B1D5DCF8609 /* ScheduledView.swift */; };
 		AE730F455432D94B5411436E /* Spotlight.swift in Sources */ = {isa = PBXBuildFile; fileRef = BA3BFA6A524076149F0CF248 /* Spotlight.swift */; };
 		B734BC6E9D04543DD43E346D /* Intents.swift in Sources */ = {isa = PBXBuildFile; fileRef = F7587AC264198D098A01C1EC /* Intents.swift */; };
 		B8BD046F1263F03E32ABA0CF /* Credits.html in Resources */ = {isa = PBXBuildFile; fileRef = 1D8DC890BD72308AE2511B48 /* Credits.html */; };
@@ -78,6 +79,7 @@
 /* Begin PBXFileReference section */
 		0CF6EF3EBAA57B99052E7FFA /* noble LICENSE (MIT).txt */ = {isa = PBXFileReference; lastKnownFileType = text; path = "noble LICENSE (MIT).txt"; sourceTree = "<group>"; };
 		0D927D9AB04679E55EA5EB57 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
+		13401F1BE3909B1D5DCF8609 /* ScheduledView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScheduledView.swift; sourceTree = "<group>"; };
 		1ABA3B4BA24FB561FE333168 /* ConversationList.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConversationList.swift; sourceTree = "<group>"; };
 		1D8DC890BD72308AE2511B48 /* Credits.html */ = {isa = PBXFileReference; lastKnownFileType = text.html; path = Credits.html; sourceTree = "<group>"; };
 		36BEEEAC09E8FD5C0A0A56C1 /* WrenWidget.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = WrenWidget.entitlements; sourceTree = "<group>"; };
@@ -144,6 +146,7 @@
 				97312053C75E291AA8E2D894 /* PGP.swift */,
 				A51E1B2227FE679BBE83CF98 /* Reader.swift */,
 				49C3187356636C6A68E72E9D /* RichEditor.swift */,
+				13401F1BE3909B1D5DCF8609 /* ScheduledView.swift */,
 				A6D840FC08F84FC0AB49A6E9 /* SecureMessage.swift */,
 				5AE9374267B2F608CB3509EF /* SettingsView.swift */,
 				D8640C94B63DEACBFF9889BF /* SignInView.swift */,
@@ -396,6 +399,7 @@
 				0FFE1974C91032067E922F4C /* PGP.swift in Sources */,
 				2E29A93DF68899707793FE76 /* Reader.swift in Sources */,
 				7274DAB5B30B98E028368E77 /* RichEditor.swift in Sources */,
+				A71D16442DC801833555EE39 /* ScheduledView.swift in Sources */,
 				F7EAF9C13BF7C142A0CCE4A7 /* SecureMessage.swift in Sources */,
 				CB08B768EE2D7CE08A546F80 /* SettingsView.swift in Sources */,
 				75887D874B944C3A8C77DDF8 /* SignInView.swift in Sources */,
