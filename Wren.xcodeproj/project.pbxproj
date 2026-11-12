@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		00C1490DDB8BE3A1EA7C1724 /* ConversationFind.swift in Sources */ = {isa = PBXBuildFile; fileRef = A584F64CF97D561783E36203 /* ConversationFind.swift */; };
 		04EAB9D1427DF1170421BA81 /* pgp.js in Resources */ = {isa = PBXBuildFile; fileRef = CB537239092D38D0F158D689 /* pgp.js */; };
 		0FC747BCD60B23166767DB8B /* MailStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6468329ED84FEB4CC050267D /* MailStore.swift */; };
 		0FFE1974C91032067E922F4C /* PGP.swift in Sources */ = {isa = PBXBuildFile; fileRef = 97312053C75E291AA8E2D894 /* PGP.swift */; };
@@ -21,6 +22,7 @@
 		5824E970115C3A1F1401C81B /* WrenShare.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 9700900A158E1EDBE3A8CE48 /* WrenShare.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		5BC7399F38D543DECD1DD658 /* UnreadMail.swift in Sources */ = {isa = PBXBuildFile; fileRef = A3D34C60B8A69FE2104BE560 /* UnreadMail.swift */; };
 		5C19CB42F6C26B263238D319 /* MessageWebView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C8C26B8B47D74D725883757C /* MessageWebView.swift */; };
+		61E698DDECB01AA6BA76EA1D /* RawSource.swift in Sources */ = {isa = PBXBuildFile; fileRef = F81CE5CC4BE22391E1CD0F1D /* RawSource.swift */; };
 		68FF34E21E69B542F75868FE /* WrenApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 491A1C435E9204F6A121EEA8 /* WrenApp.swift */; };
 		7274DAB5B30B98E028368E77 /* RichEditor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49C3187356636C6A68E72E9D /* RichEditor.swift */; };
 		75887D874B944C3A8C77DDF8 /* SignInView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D8640C94B63DEACBFF9889BF /* SignInView.swift */; };
@@ -30,6 +32,7 @@
 		8CF3B03504E2BD1B9D15FFD1 /* ConversationList.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1ABA3B4BA24FB561FE333168 /* ConversationList.swift */; };
 		902CB540957C56464BE82E99 /* OpenPGP.js LICENSE (LGPL-3.0).txt in Resources */ = {isa = PBXBuildFile; fileRef = 86746A82D57839174F40D61C /* OpenPGP.js LICENSE (LGPL-3.0).txt */; };
 		9617B3F23E608D0FC5D24F92 /* Updates.swift in Sources */ = {isa = PBXBuildFile; fileRef = ABEC626D53C7A267F87F52BB /* Updates.swift */; };
+		9757F2B6222DFF04ECDCC030 /* ConversationWindow.swift in Sources */ = {isa = PBXBuildFile; fileRef = C9D3AC8891C097B13FDCA597 /* ConversationWindow.swift */; };
 		9F07A6D8FDE147AB3816E17E /* pgp.html in Resources */ = {isa = PBXBuildFile; fileRef = 7C78688BEF761F0EB27D30C8 /* pgp.html */; };
 		A71D16442DC801833555EE39 /* ScheduledView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 13401F1BE3909B1D5DCF8609 /* ScheduledView.swift */; };
 		AE730F455432D94B5411436E /* Spotlight.swift in Sources */ = {isa = PBXBuildFile; fileRef = BA3BFA6A524076149F0CF248 /* Spotlight.swift */; };
@@ -40,6 +43,7 @@
 		D7DF2F24346216A9D337682D /* postal-mime LICENSE.txt in Resources */ = {isa = PBXBuildFile; fileRef = CACFA6D110D477919063619C /* postal-mime LICENSE.txt */; };
 		D85A2D6A43BB7540A8172440 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 86D356DA16B86D69B1A8DFAA /* Assets.xcassets */; };
 		E121F8180D488340327ED26D /* ShareViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 57DBB19D3068CD08472A2F28 /* ShareViewController.swift */; };
+		E3E5B127C229BA3527ED07FF /* QueuedChange.swift in Sources */ = {isa = PBXBuildFile; fileRef = E663509EB7F408A0A54E03E4 /* QueuedChange.swift */; };
 		F7EAF9C13BF7C142A0CCE4A7 /* SecureMessage.swift in Sources */ = {isa = PBXBuildFile; fileRef = A6D840FC08F84FC0AB49A6E9 /* SecureMessage.swift */; };
 		FC67D3956DA447116829380B /* MainView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 47B985B0FA60A4F3B388EEEA /* MainView.swift */; };
 /* End PBXBuildFile section */
@@ -102,19 +106,23 @@
 		A0C821E8ADA0F57FFE65CCE8 /* Keychain.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Keychain.swift; sourceTree = "<group>"; };
 		A3D34C60B8A69FE2104BE560 /* UnreadMail.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UnreadMail.swift; sourceTree = "<group>"; };
 		A51E1B2227FE679BBE83CF98 /* Reader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Reader.swift; sourceTree = "<group>"; };
+		A584F64CF97D561783E36203 /* ConversationFind.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConversationFind.swift; sourceTree = "<group>"; };
 		A6D840FC08F84FC0AB49A6E9 /* SecureMessage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SecureMessage.swift; sourceTree = "<group>"; };
 		ABEC626D53C7A267F87F52BB /* Updates.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Updates.swift; sourceTree = "<group>"; };
 		AC706752F0F219CB8D9CCB84 /* Demo.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Demo.swift; sourceTree = "<group>"; };
 		BA3BFA6A524076149F0CF248 /* Spotlight.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Spotlight.swift; sourceTree = "<group>"; };
 		C8C26B8B47D74D725883757C /* MessageWebView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MessageWebView.swift; sourceTree = "<group>"; };
+		C9D3AC8891C097B13FDCA597 /* ConversationWindow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConversationWindow.swift; sourceTree = "<group>"; };
 		CACFA6D110D477919063619C /* postal-mime LICENSE.txt */ = {isa = PBXFileReference; lastKnownFileType = text; path = "postal-mime LICENSE.txt"; sourceTree = "<group>"; };
 		CB537239092D38D0F158D689 /* pgp.js */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.javascript; path = pgp.js; sourceTree = "<group>"; };
 		D5958E6A8FF9CC3287A6B0C5 /* ComposeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ComposeView.swift; sourceTree = "<group>"; };
 		D8640C94B63DEACBFF9889BF /* SignInView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SignInView.swift; sourceTree = "<group>"; };
 		DD71242F1357798709AEFEB7 /* WrenShare.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = WrenShare.entitlements; sourceTree = "<group>"; };
 		E5E1D93888E59C33F73525E5 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
+		E663509EB7F408A0A54E03E4 /* QueuedChange.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QueuedChange.swift; sourceTree = "<group>"; };
 		F1BCD07307879B08E2697B2C /* WrenWidget.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = WrenWidget.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		F7587AC264198D098A01C1EC /* Intents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Intents.swift; sourceTree = "<group>"; };
+		F81CE5CC4BE22391E1CD0F1D /* RawSource.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RawSource.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -135,7 +143,9 @@
 			children = (
 				86D356DA16B86D69B1A8DFAA /* Assets.xcassets */,
 				D5958E6A8FF9CC3287A6B0C5 /* ComposeView.swift */,
+				A584F64CF97D561783E36203 /* ConversationFind.swift */,
 				1ABA3B4BA24FB561FE333168 /* ConversationList.swift */,
+				C9D3AC8891C097B13FDCA597 /* ConversationWindow.swift */,
 				AC706752F0F219CB8D9CCB84 /* Demo.swift */,
 				F7587AC264198D098A01C1EC /* Intents.swift */,
 				81B42B8CAA8D231311691A5F /* InviteCard.swift */,
@@ -144,6 +154,8 @@
 				47B985B0FA60A4F3B388EEEA /* MainView.swift */,
 				C8C26B8B47D74D725883757C /* MessageWebView.swift */,
 				97312053C75E291AA8E2D894 /* PGP.swift */,
+				E663509EB7F408A0A54E03E4 /* QueuedChange.swift */,
+				F81CE5CC4BE22391E1CD0F1D /* RawSource.swift */,
 				A51E1B2227FE679BBE83CF98 /* Reader.swift */,
 				49C3187356636C6A68E72E9D /* RichEditor.swift */,
 				13401F1BE3909B1D5DCF8609 /* ScheduledView.swift */,
@@ -388,7 +400,9 @@
 			buildActionMask = 2147483647;
 			files = (
 				2EB989950F7B4A31FB495F39 /* ComposeView.swift in Sources */,
+				00C1490DDB8BE3A1EA7C1724 /* ConversationFind.swift in Sources */,
 				8CF3B03504E2BD1B9D15FFD1 /* ConversationList.swift in Sources */,
+				9757F2B6222DFF04ECDCC030 /* ConversationWindow.swift in Sources */,
 				4C310DC5C7C74FC0EEAE56B6 /* Demo.swift in Sources */,
 				B734BC6E9D04543DD43E346D /* Intents.swift in Sources */,
 				49F466305122589001EA79E8 /* InviteCard.swift in Sources */,
@@ -397,6 +411,8 @@
 				FC67D3956DA447116829380B /* MainView.swift in Sources */,
 				5C19CB42F6C26B263238D319 /* MessageWebView.swift in Sources */,
 				0FFE1974C91032067E922F4C /* PGP.swift in Sources */,
+				E3E5B127C229BA3527ED07FF /* QueuedChange.swift in Sources */,
+				61E698DDECB01AA6BA76EA1D /* RawSource.swift in Sources */,
 				2E29A93DF68899707793FE76 /* Reader.swift in Sources */,
 				7274DAB5B30B98E028368E77 /* RichEditor.swift in Sources */,
 				A71D16442DC801833555EE39 /* ScheduledView.swift in Sources */,
