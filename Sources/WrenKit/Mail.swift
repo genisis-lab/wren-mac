@@ -176,7 +176,10 @@ extension JMAPClient {
 
     /// Send a saved draft now, or hold it until `sendAt` (scheduled send), and file it in Sent. With `privateLinkDays`
     /// (1, 7 or 30; Wren's extension) it goes out as a private link that stops working after that many days.
-    public func submit(emailId: String, account: String, identity: Identity, recipients: [EmailAddress], sendAt: Date? = nil, privateLinkDays: Int? = nil, draftsMailbox: String, sentMailbox: String) async throws {
+    /// Returns the submission, which can be cancelled while it's held (`undoStatus` "pending"): a scheduled send, or one
+    /// held for a few seconds so it can be undone.
+    @discardableResult
+    public func submit(emailId: String, account: String, identity: Identity, recipients: [EmailAddress], sendAt: Date? = nil, privateLinkDays: Int? = nil, draftsMailbox: String, sentMailbox: String) async throws -> Submission {
         var submission: [String: JSON] = ["identityId": .string(identity.id), "emailId": .string(emailId)]
         if let privateLinkDays { submission["privateLinkDays"] = .number(Double(privateLinkDays)) }
         if let sendAt {
@@ -193,7 +196,65 @@ extension JMAPClient {
             ]),
         ])
         try checkSet(r[0])
+        guard let created = r[0]["created"]?["send"], let id = created["id"]?.string else { throw JMAPError.badResponse }
+        return Submission(id: id, emailId: emailId, sendAt: created["sendAt"]?.string.flatMap(parseUTCDate), undoStatus: created["undoStatus"]?.string ?? "final")
     }
+
+    /// Messages waiting to be sent: scheduled, or held for undo, soonest first, with who they're to and their subject.
+    public func pendingSubmissions(account: String) async throws -> [Submission] {
+        let a = JSON.string(account)
+        let r = try await call([
+            ("EmailSubmission/query", ["accountId": a, "filter": ["undoStatus": "pending"]]),
+            ("EmailSubmission/get", ["accountId": a, "#ids": ["resultOf": "0", "name": "EmailSubmission/query", "path": "/ids"],
+                                     "properties": ["emailId", "threadId", "sendAt", "undoStatus"]]),
+            ("Email/get", ["accountId": a, "#ids": ["resultOf": "1", "name": "EmailSubmission/get", "path": "/list/*/emailId"],
+                           "properties": ["subject", "to", "cc", "bcc"]]),
+        ])
+        var emails: [String: JSON] = [:]
+        for e in r[2]["list"]?.array ?? [] { if let id = e["id"]?.string { emails[id] = e } }
+        return (r[1]["list"]?.array ?? []).compactMap { s -> Submission? in
+            guard let id = s["id"]?.string, let emailId = s["emailId"]?.string else { return nil }
+            var sub = Submission(id: id, emailId: emailId, sendAt: s["sendAt"]?.string.flatMap(parseUTCDate), undoStatus: s["undoStatus"]?.string ?? "pending")
+            sub.threadId = s["threadId"]?.string
+            if let e = emails[emailId] {
+                sub.subject = e["subject"]?.string
+                sub.to = ["to", "cc", "bcc"].flatMap { (try? (e[$0] ?? []).decode([EmailAddress].self)) ?? [] }
+            }
+            return sub
+        }.sorted { ($0.sendAt ?? .distantFuture) < ($1.sendAt ?? .distantFuture) }
+    }
+
+    /// Stop a held message from going out. It's back in Drafts; returns its id there (taking Wren's domain footer
+    /// off makes it a new email). Throws `cannotUnsend` once it has gone.
+    public func cancel(submission id: String, account: String) async throws -> String? {
+        let a = JSON.string(account)
+        let r = try await call([
+            ("EmailSubmission/set", ["accountId": a, "update": [id: ["undoStatus": "canceled"]]]),
+            ("EmailSubmission/get", ["accountId": a, "ids": [.string(id)], "properties": ["emailId"]]),
+        ])
+        try checkSet(r[0])
+        return r[1]["list"]?.array?.first?["emailId"]?.string
+    }
+}
+
+/// A message handed to the server to send (RFC 8621 7). While `undoStatus` is "pending" it can still be cancelled.
+public struct Submission: Sendable, Hashable, Identifiable {
+    public var id: String
+    public var emailId: String
+    public var threadId: String?
+    public var sendAt: Date?
+    public var undoStatus: String
+    public var subject: String?
+    public var to: [EmailAddress] = []
+
+    public init(id: String, emailId: String, sendAt: Date?, undoStatus: String) {
+        self.id = id
+        self.emailId = emailId
+        self.sendAt = sendAt
+        self.undoStatus = undoStatus
+    }
+
+    public var isPending: Bool { undoStatus == "pending" }
 }
 
 // MARK: Wren's extension

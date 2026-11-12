@@ -377,3 +377,8 @@ extension JSONDecoder {
 func utcDate(_ date: Date) -> String {
     date.formatted(.iso8601)
 }
+
+/// A UTCDate from JMAP, with or without fractions of a second.
+func parseUTCDate(_ text: String) -> Date? {
+    (try? Date(text, strategy: .iso8601)) ?? (try? Date(text, strategy: Date.ISO8601FormatStyle(includingFractionalSeconds: true)))
+}

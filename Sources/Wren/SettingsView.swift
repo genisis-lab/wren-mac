@@ -30,6 +30,7 @@ struct SettingsView: View {
 
 struct GeneralSettings: View {
     @State private var current = GeneralSettings.defaultApp
+    @AppStorage("undoSendSeconds") private var undoSendSeconds = 10
     private let updates = Updates.shared
 
     /// The app that opens mailto: links now.
@@ -54,6 +55,15 @@ struct GeneralSettings: View {
             Text("Email links in other apps and on the web open a new message in your default email app.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
+            Section("Writing") {
+                Picker("Undo Send", selection: $undoSendSeconds) {
+                    Text("Off").tag(0)
+                    ForEach([5, 10, 20, 30], id: \.self) { Text("\($0) seconds").tag($0) }
+                }
+                Text("After you click Send, the message waits this long, so Edit → Undo Send (⌘Z) can stop it.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
             Section("Updates") {
                 Toggle("Automatically check for updates", isOn: Binding(
                     get: { updates.automaticallyChecks },

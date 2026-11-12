@@ -382,6 +382,56 @@ final class WrenKitTests: XCTestCase {
         ])
     }
 
+    func testHeldSendsCanBeListedAndStopped() async throws {
+        let client = JMAPClient(server: URL(string: "https://mail.test")!, username: "ada@wren.test", password: "wren_app", http: Mock.session)
+        Mock.handler = { request in
+            if request.url?.path == "/jmap/session" {
+                return [
+                    "apiUrl": "https://mail.test/jmap/api", "downloadUrl": "", "uploadUrl": "", "username": "ada@wren.test",
+                    "capabilities": [Capability.core: [:], Capability.mail: [:]],
+                    "accounts": ["u1": ["name": "ada@wren.test", "isPersonal": true, "accountCapabilities": [Capability.mail: [:]]]],
+                ]
+            }
+            let body = try JSONDecoder().decode(JSON.self, from: Mock.body(of: request))
+            let calls = body["methodCalls"]?.array ?? []
+            let first = calls.first?.array ?? []
+            switch first.first?.string {
+            case "EmailSubmission/query":
+                XCTAssertEqual(first[1]["filter"], ["undoStatus": "pending"])
+                return ["methodResponses": [
+                    ["EmailSubmission/query", ["ids": ["S2", "S1"]], "0"],
+                    ["EmailSubmission/get", ["list": [
+                        ["id": "S2", "emailId": "M2", "threadId": "T2", "sendAt": "2026-12-02T09:00:00Z", "undoStatus": "pending"],
+                        ["id": "S1", "emailId": "M1", "threadId": "T1", "sendAt": "2026-12-01T09:00:00.000Z", "undoStatus": "pending"],
+                    ]], "1"],
+                    ["Email/get", ["list": [["id": "M1", "subject": "Plans", "to": [["name": "Grace", "email": "grace@example.com"]], "cc": nil, "bcc": []]]], "2"],
+                ]]
+            case "EmailSubmission/set" where first[1]["update"] != nil:
+                XCTAssertEqual(first[1]["update"], ["S1": ["undoStatus": "canceled"]])
+                return ["methodResponses": [
+                    ["EmailSubmission/set", ["updated": ["S1": nil]], "0"],
+                    ["EmailSubmission/get", ["list": [["id": "S1", "emailId": "M9"]]], "1"],
+                ]]
+            default:
+                // Held for undo: HOLDUNTIL in the envelope; the server says it's pending.
+                XCTAssertNotNil(first[1]["create"]?["send"]?["envelope"]?["mailFrom"]?["parameters"]?["HOLDUNTIL"])
+                return ["methodResponses": [["EmailSubmission/set", ["created": ["send": ["id": "S3", "undoStatus": "pending", "sendAt": "2026-12-01T09:00:10Z"]]], "0"]]]
+            }
+        }
+        let me = Identity(id: "I1", name: "Ada", email: "ada@wren.test")
+        let sent = try await client.submit(emailId: "M3", account: "u1", identity: me, recipients: [EmailAddress(email: "grace@example.com")], sendAt: .now + 10, draftsMailbox: "d", sentMailbox: "s")
+        XCTAssertEqual(sent.id, "S3")
+        XCTAssertTrue(sent.isPending)
+        XCTAssertEqual(sent.sendAt, parseUTCDate("2026-12-01T09:00:10Z"))
+        let list = try await client.pendingSubmissions(account: "u1")
+        XCTAssertEqual(list.map(\.id), ["S1", "S2"])
+        XCTAssertEqual(list.first?.subject, "Plans")
+        XCTAssertEqual(list.first?.to.map(\.email), ["grace@example.com"])
+        XCTAssertEqual(list.first?.threadId, "T1")
+        let back = try await client.cancel(submission: "S1", account: "u1")
+        XCTAssertEqual(back, "M9")
+    }
+
     func testWrenExtensionCalls() async throws {
         let client = JMAPClient(server: URL(string: "https://mail.test")!, username: "ada@wren.test", password: "wren_app", http: Mock.session)
         Mock.handler = { request in

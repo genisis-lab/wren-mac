@@ -19,6 +19,7 @@ struct MainView: View {
         }
         .searchable(text: $store.search, placement: .toolbar, prompt: "Search")
         .onAppear { store.undoManager = undoManager }
+        .sheet(isPresented: $store.showingScheduled) { ScheduledView() }
         .alert("Something went wrong", isPresented: Binding(get: { store.alert != nil }, set: { if !$0 { store.alert = nil } })) {
             Button("OK", role: .cancel) {}
         } message: {
@@ -87,19 +88,27 @@ struct Sidebar: View {
         }
         .listStyle(.sidebar)
         .safeAreaInset(edge: .bottom) {
-            if !notes.isEmpty {
-                VStack(alignment: .leading, spacing: 8) {
-                    ForEach(notes, id: \.text) { note in
-                        Label(note.text, systemImage: note.icon)
-                            .lineLimit(3)
-                            .help(note.help)
-                    }
-                }
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(10)
+            VStack(spacing: 0) {
+                if let pending = store.pendingSend { UndoSendBar(pending: pending) }
+                notesView
             }
+        }
+    }
+
+    @ViewBuilder
+    private var notesView: some View {
+        if !notes.isEmpty {
+            VStack(alignment: .leading, spacing: 8) {
+                ForEach(notes, id: \.text) { note in
+                    Label(note.text, systemImage: note.icon)
+                        .lineLimit(3)
+                        .help(note.help)
+                }
+            }
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(10)
         }
     }
 
@@ -121,6 +130,35 @@ struct Sidebar: View {
             }
             return notes
         }
+    }
+}
+
+/// A message that was just sent, held for a few seconds: Undo stops it and opens it again.
+struct UndoSendBar: View {
+    let pending: PendingSend
+    @Environment(MailStore.self) private var store
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "paperplane")
+            // Counts down to when it goes.
+            Text(timerInterval: Date.now...max(Date.now, pending.until), countsDown: true)
+                .monospacedDigit()
+                .frame(width: 34, alignment: .leading)
+            Text(pending.draft.subject.isEmpty ? "Sending" : "Sending “\(pending.draft.subject)”")
+                .lineLimit(1)
+                .truncationMode(.middle)
+            Spacer(minLength: 4)
+            Button("Undo") { Task { await store.undoSend(pending) } }
+                .controlSize(.small)
+        }
+        .font(.callout)
+        .padding(10)
+        .background(.quaternary.opacity(0.6), in: RoundedRectangle(cornerRadius: 8))
+        .padding(8)
+        .transition(.move(edge: .bottom).combined(with: .opacity))
+        .accessibilityElement(children: .combine)
+        .accessibilityAction(named: "Undo Send") { Task { await store.undoSend(pending) } }
     }
 }
 

@@ -66,6 +66,16 @@ final class Login: Identifiable {
     }
 }
 
+/// A message held for a few seconds after Send, so it can still be stopped.
+struct PendingSend: Equatable {
+    var submission: String
+    var login: String
+    var account: String
+    /// The message as it was written, to open again.
+    var draft: Draft
+    var until: Date
+}
+
 /// Everything the windows show, and every change they make, for every sign-in.
 @MainActor
 @Observable
@@ -109,6 +119,10 @@ final class MailStore {
     var confirmingDelete: Set<String>?
     /// The Trash or Junk mailbox waiting for "Empty" to be confirmed.
     var confirmingEmpty: MailboxRef?
+    /// A message just sent and still held for Undo Send.
+    private(set) var pendingSend: PendingSend?
+    /// The Scheduled Messages sheet is open.
+    var showingScheduled = false
 
     @ObservationIgnored var undoManager: UndoManager?
     /// For windows opened from outside a window: mailto: links and notifications. Set by the main window.
@@ -922,14 +936,80 @@ final class MailStore {
         return id
     }
 
-    func send(_ draft: Draft, savedAs emailId: String, at date: Date? = nil) async throws {
+    /// Send a saved draft, at `date` or now. Sent now from a message window (`undo` is the message as written, to
+    /// open again), it's held for a few seconds first (Settings → Composing), so Undo Send can stop it.
+    func send(_ draft: Draft, savedAs emailId: String, at date: Date? = nil, undo: Draft? = nil) async throws {
         guard let login = login(of: draft), let place = place(of: draft), let identity = identity(for: draft),
               let drafts = mailbox(role: "drafts", in: place), let sent = mailbox(role: "sent", in: place)
         else { throw NotConnected() }
-        try await login.client.submit(
-            emailId: emailId, account: draft.accountId, identity: identity, recipients: draft.recipients, sendAt: date,
+        let hold = Self.undoSendSeconds
+        let held = date == nil && undo != nil && hold > 0 ? Date.now.addingTimeInterval(Double(hold)) : nil
+        let submission = try await login.client.submit(
+            emailId: emailId, account: draft.accountId, identity: identity, recipients: draft.recipients, sendAt: date ?? held,
             privateLinkDays: draft.privateLinkDays, draftsMailbox: drafts.id, sentMailbox: sent.id
         )
+        if let held, let undo, submission.isPending {
+            let pending = PendingSend(submission: submission.id, login: login.id, account: draft.accountId, draft: undo, until: submission.sendAt ?? held)
+            pendingSend = pending
+            undoManager?.registerUndo(withTarget: self) { store in
+                Task { await store.undoSend(pending) }
+            }
+            undoManager?.setActionName("Send")
+            Task { [weak self] in
+                try? await Task.sleep(for: .seconds(max(0, pending.until.timeIntervalSinceNow) + 1))
+                if self?.pendingSend == pending { self?.pendingSend = nil }
+            }
+        }
+        await refresh(login)
+    }
+
+    /// How long a message waits before it goes, so it can be undone (0: straight away).
+    static var undoSendSeconds: Int {
+        UserDefaults.standard.object(forKey: "undoSendSeconds") as? Int ?? 10
+    }
+
+    /// Stop a message held for Undo Send and open it again to keep writing.
+    func undoSend(_ pending: PendingSend? = nil) async {
+        guard let pending = pending ?? pendingSend, let login = login(pending.login) else { return }
+        if pendingSend == pending { pendingSend = nil }
+        do {
+            let back = try await login.client.cancel(submission: pending.submission, account: pending.account)
+            var draft = pending.draft
+            draft.replaces = back
+            openWindow?(id: "compose", value: draft)
+            NSApp.activate()
+        } catch JMAPError.notSaved("cannotUnsend", _) {
+            alert = "It was too late to undo: the message has been sent."
+        } catch {
+            alert = "The message couldn’t be stopped: \(error.localizedDescription)"
+        }
+        await refresh(login)
+    }
+
+    // MARK: Scheduled messages
+
+    /// Messages waiting to go out in every sign-in's accounts, soonest first.
+    func scheduled() async -> [(submission: Submission, login: String, account: String)] {
+        var out: [(submission: Submission, login: String, account: String)] = []
+        for login in logins {
+            for account in login.accounts where account.canSend != false {
+                guard let list = try? await login.client.pendingSubmissions(account: account.id) else { continue }
+                out += list.map { ($0, login.id, account.id) }
+            }
+        }
+        return out.sorted { ($0.submission.sendAt ?? .distantFuture) < ($1.submission.sendAt ?? .distantFuture) }
+    }
+
+    /// Stop a scheduled message; it goes back to Drafts. With `edit`, it opens to change and send again.
+    func cancelScheduled(_ submission: Submission, login loginId: String, account: String, edit: Bool) async throws {
+        guard let login = login(loginId) else { throw NotConnected() }
+        let back = try await login.client.cancel(submission: submission.id, account: account)
+        if edit, let back, let threadId = submission.threadId,
+           let email = try await login.client.conversation(account: account, threadId: threadId).first(where: { $0.id == back }) {
+            var d = Draft.editing(email, account: account, identities: login.identities[account] ?? [])
+            d.login = login.id
+            openWindow?(id: "compose", value: d)
+        }
         await refresh(login)
     }
 

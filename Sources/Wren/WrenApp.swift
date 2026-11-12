@@ -123,6 +123,9 @@ struct MailCommands: Commands {
                 if let ref = store.selectedMailbox { Task { await store.markAllRead(in: ref) } }
             }
             .disabled(!signedIn || (store.mailbox(store.selectedMailbox)?.unreadEmails ?? 0) == 0)
+            Divider()
+            Button("Scheduled Messages…") { store.showingScheduled = true }
+                .disabled(!signedIn)
         }
         CommandMenu("Message") {
             Button("Reply") { if let d = store.replyDraft(all: false) { openWindow(id: "compose", value: d) } }

@@ -470,7 +470,7 @@ struct ComposeView: View {
                 draft.replaces = id
                 outgoing.replaces = id
                 saved = draft
-                try await store.send(outgoing, savedAs: id, at: date)
+                try await store.send(outgoing, savedAs: id, at: date, undo: draft)
                 done = true
                 dismiss()
             } catch {
