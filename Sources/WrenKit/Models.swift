@@ -10,7 +10,8 @@ public enum Capability {
     public static let quota = "urn:ietf:params:jmap:quota"
     public static let vacation = "urn:ietf:params:jmap:vacationresponse"
     public static let contacts = "urn:ietf:params:jmap:contacts"
-    /// Wren's own extension: calendar invitations, private links and PGP keys (docs/jmap.md in genisis-lab/mail).
+    /// Wren's own extension: calendar invitations, private links, PGP keys, preferences and the admin unlock
+    /// (docs/jmap.md in genisis-lab/mail).
     public static let wren = "https://github.com/genisis-lab/mail/jmap"
 }
 
@@ -36,7 +37,8 @@ public struct Session: Decodable, Sendable {
                 let wren = info.accountCapabilities[Capability.wren]
                 return Account(
                     id: id, name: info.name, isPersonal: info.isPersonal, capabilities: Set(info.accountCapabilities.keys),
-                    canSend: wren?["canSend"]?.bool, canUnsubscribe: wren?["unsubscribe"]?.bool
+                    canSend: wren?["canSend"]?.bool, canUnsubscribe: wren?["unsubscribe"]?.bool,
+                    hasPreferences: wren?["preferences"]?.bool, adminRole: wren?["adminRole"]?.string
                 )
             }
             .sorted { ($0.isPersonal ? 0 : 1, $0.name) < ($1.isPersonal ? 0 : 1, $1.name) }
@@ -52,6 +54,24 @@ public struct Account: Codable, Hashable, Sendable, Identifiable {
     public var canSend: Bool?
     /// Whether the server can unsubscribe from mailing lists for you (Wren's extension, newer servers).
     public var canUnsubscribe: Bool?
+    /// Whether Wren's Preferences (default From, signatures) can be read and changed here (own account, newer servers).
+    public var hasPreferences: Bool?
+    /// "owner", "admin" or "helpdesk" when this person may unlock the admin panel in the app (own account only).
+    public var adminRole: String?
+
+    public init(
+        id: String, name: String, isPersonal: Bool, capabilities: Set<String>, canSend: Bool? = nil, canUnsubscribe: Bool? = nil,
+        hasPreferences: Bool? = nil, adminRole: String? = nil
+    ) {
+        self.id = id
+        self.name = name
+        self.isPersonal = isPersonal
+        self.capabilities = capabilities
+        self.canSend = canSend
+        self.canUnsubscribe = canUnsubscribe
+        self.hasPreferences = hasPreferences
+        self.adminRole = adminRole
+    }
 
     public var canSnooze: Bool { capabilities.contains(Capability.snooze) }
     /// Invitations, private links and PGP keys.

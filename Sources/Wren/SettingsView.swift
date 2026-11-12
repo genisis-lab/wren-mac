@@ -14,6 +14,9 @@ struct SettingsView: View {
             AccountSettings()
                 .tabItem { Label("Accounts", systemImage: "person.crop.circle") }
                 .tag("account")
+            SignatureSettings()
+                .tabItem { Label("Signatures", systemImage: "signature") }
+                .tag("signatures")
             OutOfOfficeSettings()
                 .tabItem { Label("Out of Office", systemImage: "airplane") }
                 .tag("vacation")
@@ -29,9 +32,14 @@ struct SettingsView: View {
 }
 
 struct GeneralSettings: View {
+    @Environment(MailStore.self) private var store
     @State private var current = GeneralSettings.defaultApp
     @AppStorage("undoSendSeconds") private var undoSendSeconds = 10
     @AppStorage("warnBeforeSending") private var warnBeforeSending = true
+    @AppStorage("notifyNewMail") private var notifyNewMail = true
+    @AppStorage("notificationSound") private var notificationSound = true
+    /// The sign-in new messages are from while All Inboxes is shown ("" for the first).
+    @AppStorage("defaultLogin") private var defaultLogin = ""
     private let updates = Updates.shared
 
     /// The app that opens mailto: links now.
@@ -65,6 +73,31 @@ struct GeneralSettings: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
                 Toggle("Ask before sending without a subject, or without an attachment you mention", isOn: $warnBeforeSending)
+                if store.logins.count > 1 {
+                    Picker("New messages from", selection: Binding(
+                        get: { store.login(defaultLogin)?.id ?? store.logins.first?.id ?? "" },
+                        set: { defaultLogin = $0 }
+                    )) {
+                        ForEach(store.logins) { Text($0.username).tag($0.id) }
+                    }
+                    Text("When you’re looking at All Inboxes. In one account’s mailboxes, new messages are from that account.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            Section("Notifications") {
+                Toggle("Show a notification when new mail arrives", isOn: $notifyNewMail)
+                Toggle("Play a sound", isOn: $notificationSound)
+                    .disabled(!notifyNewMail)
+                HStack {
+                    Text("macOS also asks whether Wren may show notifications.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    Button("Notification Settings…") {
+                        if let url = URL(string: "x-apple.systempreferences:com.apple.Notifications-Settings.extension") { NSWorkspace.shared.open(url) }
+                    }
+                }
             }
             Section("Updates") {
                 Toggle("Automatically check for updates", isOn: Binding(
@@ -95,6 +128,7 @@ struct GeneralSettings: View {
 /// Each Wren sign-in, with its storage and shared mailboxes; add another or remove one.
 struct AccountSettings: View {
     @Environment(MailStore.self) private var store
+    @Environment(\.openWindow) private var openWindow
     @State private var adding = false
     @State private var removing: Login?
 
@@ -121,6 +155,14 @@ struct AccountSettings: View {
                         LabeledContent("Shared mailboxes") {
                             Text(shared.map(\.name).joined(separator: "\n"))
                                 .multilineTextAlignment(.trailing)
+                        }
+                    }
+                    if let role = login.adminRole {
+                        LabeledContent("Administration") {
+                            Button(role == "helpdesk" ? "Open Helpdesk…" : "Open Admin Panel…") {
+                                AdminPanel.shared.show(login)
+                                openWindow(id: "admin")
+                            }
                         }
                     }
                     Button("Remove Account…", role: .destructive) { removing = login }
@@ -243,9 +285,21 @@ struct OutOfOfficeSettings: View {
 
 struct ViewingSettings: View {
     @AppStorage("loadRemoteContent") private var loadRemoteContent = false
+    @AppStorage(ReaderTextSize.key) private var textSize = 1.0
 
     var body: some View {
         Form {
+            Picker("Message text size", selection: Binding(
+                get: { ReaderTextSize.sizes.min { abs($0 - textSize) < abs($1 - textSize) } ?? 1 },
+                set: { textSize = $0 }
+            )) {
+                ForEach(ReaderTextSize.sizes, id: \.self) { size in
+                    Text(size == 1 ? "100% (Actual Size)" : "\(Int((size * 100).rounded()))%").tag(size)
+                }
+            }
+            Text("Also View → Bigger (⌘+) and Smaller (⌘−).")
+                .font(.caption)
+                .foregroundStyle(.secondary)
             Toggle("Load remote content in messages", isOn: $loadRemoteContent)
             Text("Remote images and fonts can tell a sender when you opened their message and roughly where you are. When this is off, each message has a button to load them. Pictures that only track you are never loaded.")
                 .font(.caption)

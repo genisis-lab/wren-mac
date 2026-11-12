@@ -34,6 +34,10 @@ final class Login: Identifiable {
     var identities: [String: [Identity]] = [:]
     /// Storage used and allowed in its own account, when the server says.
     var quota: Quota?
+    /// Wren's settings for its own account (default From, signatures), on servers that share them with apps.
+    var preferences: Preferences?
+    /// The admin panel for this sign-in, when its person is an admin or helpdesk staff. Its unlock lives only in memory.
+    @ObservationIgnored let admin: AdminClient
     /// A connection problem, shown quietly under the sidebar until the connection is back.
     var problem: String?
     @ObservationIgnored var listening: Task<Void, Never>?
@@ -47,6 +51,7 @@ final class Login: Identifiable {
         let key = Login.key(server: client.server, username: client.username)
         let folder = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appendingPathComponent("Wren/Cache")
         self.client = client
+        admin = AdminClient(client: client)
         id = key
         cache = MailCache(folder: folder.appendingPathComponent(key.addingPercentEncoding(withAllowedCharacters: .alphanumerics) ?? key))
         // What it showed last time, until the server answers.
@@ -63,6 +68,9 @@ final class Login: Identifiable {
 
     /// Its own account (shared mailboxes have no storage limit, out-of-office reply or contacts of their own).
     var personal: Account? { accounts.first(where: \.isPersonal) }
+
+    /// "owner", "admin" or "helpdesk" when this person may open the admin panel here.
+    var adminRole: String? { personal?.adminRole }
 
     func ref(role: String, in account: String) -> MailboxRef? {
         mailboxes[account]?.first { $0.role == role }.map { MailboxRef(login: id, account: account, mailbox: $0.id) }
@@ -293,6 +301,7 @@ final class MailStore {
         let login = Login(client)
         if let old = self.login(login.id) {
             old.listening?.cancel()
+            AdminPanel.shared.signedOut(old)
             logins.removeAll { $0 === old }
         }
         logins.append(login)
@@ -309,6 +318,8 @@ final class MailStore {
     /// Sign out of one sign-in: its app password and the mail kept on this Mac are deleted.
     func remove(_ login: Login, message: String? = nil) {
         login.listening?.cancel()
+        // Its admin unlock ends with it, here and on the server.
+        AdminPanel.shared.signedOut(login)
         Keychain.delete(username: login.username, server: login.client.server)
         PGP.shared.forget(login)
         decrypted = [:]
@@ -355,6 +366,9 @@ final class MailStore {
                 let session = try await login.client.connect()
                 login.accounts = session.mailAccounts
                 for account in login.accounts { login.identities[account.id] = try await login.client.identities(account: account.id) }
+                if let personal = login.personal, personal.hasPreferences == true {
+                    login.preferences = try? await login.client.preferences(account: personal.id)
+                }
                 await sendQueued(login)
                 openPending()
                 delay = 2
@@ -1208,25 +1222,35 @@ final class MailStore {
         return d
     }
 
-    /// New messages come from the account being looked at, or the first sign-in.
+    /// New messages come from the account being looked at, or the sign-in chosen in Settings → General, or the first.
     private var writingPlace: MailboxRef? {
         if let ref = selectedMailbox, ref != .allInboxes { return ref }
-        return inboxes.first
+        let chosen = UserDefaults.standard.string(forKey: "defaultLogin")
+        return inboxes.first { $0.login == chosen } ?? inboxes.first
     }
 
     func newDraft(to: String = "") -> Draft? {
-        draft(in: writingPlace) { .new(account: $0, identity: $1.first, to: to) }
+        guard let place = writingPlace else { return nil }
+        let from = login(place.login)?.preferences?.defaultFrom
+        return draft(in: place) { .new(account: $0, identity: Identity.preferred(from, among: $1), to: to) }
+    }
+
+    /// Whether replies and forwards in this place get the signature (Wren's setting; on when the server doesn't say).
+    private func signsReplies(_ place: MailboxRef?) -> Bool {
+        login(place?.login)?.preferences?.signatureOnReplies ?? true
     }
 
     /// `place` is where the conversation is, for one in a window of its own; otherwise the reader's.
     func replyDraft(to email: Email? = nil, all: Bool, in place: MailboxRef? = nil) -> Draft? {
         guard let email = email ?? replyTarget else { return nil }
-        return encrypted(email) { email in draft(in: place ?? threadPlace) { .reply(to: email, all: all, account: $0, identities: $1) } }
+        let signature = signsReplies(place ?? threadPlace)
+        return encrypted(email) { email in draft(in: place ?? threadPlace) { .reply(to: email, all: all, account: $0, identities: $1, signature: signature) } }
     }
 
     func forwardDraft(of email: Email? = nil, in place: MailboxRef? = nil) -> Draft? {
         guard let email = email ?? replyTarget else { return nil }
-        return encrypted(email) { email in draft(in: place ?? threadPlace) { .forward(email, account: $0, identities: $1) } }
+        let signature = signsReplies(place ?? threadPlace)
+        return encrypted(email) { email in draft(in: place ?? threadPlace) { .forward(email, account: $0, identities: $1, signature: signature) } }
     }
 
     /// Answering encrypted mail: quoted as it was decrypted (when it was), and encrypted again by default.
@@ -1483,6 +1507,32 @@ final class MailStore {
         return Array(found.filter { emails.insert($0.email.lowercased()).inserted }.prefix(8))
     }
 
+    // MARK: Settings
+
+    /// Settings → General → Notifications.
+    static var notifiesNewMail: Bool { UserDefaults.standard.object(forKey: "notifyNewMail") as? Bool ?? true }
+    static var notificationSound: Bool { UserDefaults.standard.object(forKey: "notificationSound") as? Bool ?? true }
+
+    /// A sign-in's Wren settings as they are on the server now, if it shares them with apps.
+    func preferences(_ login: Login) async throws -> Preferences? {
+        guard let personal = login.personal, personal.hasPreferences == true else { return nil }
+        let prefs = try await login.client.preferences(account: personal.id)
+        login.preferences = prefs
+        return prefs
+    }
+
+    /// Save Wren settings (and your name), then fetch the identities again so new messages get the new signatures.
+    func savePreferences(_ prefs: Preferences, was old: Preferences, name: String?, in login: Login) async throws {
+        guard let personal = login.personal else { throw NotConnected() }
+        let identities = login.identities[personal.id] ?? []
+        if let name, let mailbox = identities.first(where: { $0.email.lowercased() == login.username.lowercased() }) ?? identities.first {
+            try await login.client.rename(identity: mailbox.id, to: name, account: personal.id)
+        }
+        try await login.client.setPreferences(prefs, was: old, account: personal.id)
+        login.preferences = try await login.client.preferences(account: personal.id)
+        login.identities[personal.id] = try await login.client.identities(account: personal.id)
+    }
+
     // MARK: Out of office
 
     /// A sign-in's out-of-office reply, if its server offers one.
@@ -1649,13 +1699,13 @@ final class MailStore {
         if !stale.isEmpty { center.removeDeliveredNotifications(withIdentifiers: stale) }
         let known = login.announced
         login.announced = (known ?? []).union(unread.map(\.id))
-        guard let known else { return }
+        guard let known, Self.notifiesNewMail else { return }
         for email in unread where !known.contains(email.id) {
             let content = UNMutableNotificationContent()
             content.title = email.from?.first?.displayName ?? "New Message"
             content.subtitle = logins.count > 1 ? "\(login.username) · \(email.subject ?? "")" : email.subject ?? ""
             content.body = email.preview ?? ""
-            content.sound = .default
+            content.sound = Self.notificationSound ? .default : nil
             content.categoryIdentifier = Self.newMail.identifier
             content.threadIdentifier = email.threadId
             // Clicking it opens the conversation; its buttons are in notificationAction (both from AppDelegate).

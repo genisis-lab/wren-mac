@@ -128,6 +128,26 @@ public actor JMAPClient {
         }
     }
 
+    /// A plain HTTPS request to the server with this sign-in's app password (the admin unlock and Wren's admin API,
+    /// which aren't JMAP). Answers the status and body whatever the status; throws only when the server can't be reached.
+    public func request(_ method: String, path: String, body: JSON? = nil, headers: [String: String] = [:]) async throws -> (status: Int, data: Data) {
+        guard let url = URL(string: path, relativeTo: server) else { throw JMAPError.badResponse }
+        var request = URLRequest(url: url)
+        request.httpMethod = method
+        request.cachePolicy = .reloadIgnoringLocalCacheData
+        request.setValue(authorization, forHTTPHeaderField: "Authorization")
+        // Wren's API takes changes only with this header (its guard against other websites).
+        request.setValue("1", forHTTPHeaderField: "X-Wren")
+        for (key, value) in headers { request.setValue(value, forHTTPHeaderField: key) }
+        if let body {
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            request.httpBody = try JSONEncoder().encode(body)
+        }
+        let (data, response) = try await http.data(for: request)
+        guard let response = response as? HTTPURLResponse else { throw JMAPError.badResponse }
+        return (response.statusCode, data)
+    }
+
     /// Make method calls in one request. Call `i` has the id "i", for result references.
     public func call(_ calls: [(String, JSON)]) async throws -> Responses {
         let session = try await currentSession()

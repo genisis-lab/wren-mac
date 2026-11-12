@@ -160,7 +160,7 @@ struct Demo: ViewModifier {
             await shoot("10-all-inboxes", in: dir)
         }
 
-        for tab in ["general", "account", "vacation", "viewing", "encryption"] {
+        for tab in ["general", "account", "signatures", "vacation", "viewing", "encryption"] {
             UserDefaults.standard.set(tab, forKey: "settingsTab")
             openSettings()
             await wait(2)
