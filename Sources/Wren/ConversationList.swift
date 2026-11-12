@@ -16,46 +16,7 @@ struct ConversationList: View {
                     .tag(conversation.id)
                     // Onto a sidebar mailbox or label (the whole selection, when this row is in it).
                     .draggable(store.dragPayload(for: conversation.id))
-                    // VoiceOver's Actions rotor: what swipes and the right-click menu do.
-                    .accessibilityAction(named: conversation.email.isUnread ? "Mark as Read" : "Mark as Unread") {
-                        Task { await store.setRead([conversation.id], conversation.email.isUnread) }
-                    }
-                    .accessibilityAction(named: conversation.email.isFlagged ? "Unflag" : "Flag") {
-                        Task { await store.toggleFlag([conversation.id]) }
-                    }
-                    .accessibilityAction(named: store.canMoveToInbox ? "Move to Inbox" : "Archive") {
-                        Task {
-                            if store.canMoveToInbox { await store.moveToInbox([conversation.id]) } else { await store.archive([conversation.id]) }
-                        }
-                    }
-                    .accessibilityAction(named: store.currentRole == "trash" ? "Delete Forever" : "Move to Trash") {
-                        Task { await store.trash([conversation.id]) }
-                    }
-                    .accessibilityAction(named: "Open in New Window") { store.openInWindow(conversation.id) }
-                    .swipeActions(edge: .leading) {
-                        let unread = conversation.email.isUnread
-                        Button {
-                            Task { await store.setRead([conversation.id], unread) }
-                        } label: {
-                            Label(unread ? "Read" : "Unread", systemImage: unread ? "envelope.open" : "envelope.badge")
-                        }
-                        .tint(.blue)
-                    }
-                    .swipeActions(edge: .trailing) {
-                        Button(role: .destructive) {
-                            Task { await store.trash([conversation.id]) }
-                        } label: {
-                            Label("Trash", systemImage: "trash")
-                        }
-                        if !["archive", "drafts", "sent"].contains(store.currentRole ?? "") {
-                            Button {
-                                Task { await store.archive([conversation.id]) }
-                            } label: {
-                                Label("Archive", systemImage: "archivebox")
-                            }
-                            .tint(.indigo)
-                        }
-                    }
+                    .modifier(RowActions(conversation: conversation))
             }
             if store.conversations.count < store.total {
                 LoadMoreRow()
@@ -64,7 +25,6 @@ struct ConversationList: View {
         .contextMenu(forSelectionType: String.self) { ids in
             MessageActions(ids: ids)
         } primaryAction: { ids in
-            // Double-clicking a draft opens it to keep writing, as in Mail.
             // Double-clicking a draft opens it to keep writing; anything else opens in a window of its own, as in Mail.
             guard ids.count == 1, let id = ids.first else { return }
             if store.currentRole == "drafts" {
@@ -124,6 +84,67 @@ struct ConversationList: View {
         if store.unreadOnly { return store.total == 1 ? "1 unread conversation" : "\(store.total.formatted()) unread conversations" }
         let all = store.total == 1 ? "1 conversation" : "\(store.total.formatted()) conversations"
         return unread > 0 && store.currentRole != "drafts" ? "\(all), \(unread.formatted()) unread" : all
+    }
+}
+
+/// What a row offers besides a click: VoiceOver's actions and the swipes, kept apart so the list's body type-checks quickly.
+private struct RowActions: ViewModifier {
+    @Environment(MailStore.self) private var store
+    let conversation: Conversation
+
+    func body(content: Content) -> some View {
+        swipes(spoken(content))
+    }
+
+    /// VoiceOver's Actions rotor: what swipes and the right-click menu do.
+    private func spoken(_ content: Content) -> some View {
+        let id = conversation.id
+        let unread = conversation.email.isUnread
+        return content
+            .accessibilityAction(named: unread ? "Mark as Read" : "Mark as Unread") {
+                Task { await store.setRead([id], unread) }
+            }
+            .accessibilityAction(named: conversation.email.isFlagged ? "Unflag" : "Flag") {
+                Task { await store.toggleFlag([id]) }
+            }
+            .accessibilityAction(named: store.canMoveToInbox ? "Move to Inbox" : "Archive") {
+                Task {
+                    if store.canMoveToInbox { await store.moveToInbox([id]) } else { await store.archive([id]) }
+                }
+            }
+            .accessibilityAction(named: store.currentRole == "trash" ? "Delete Forever" : "Move to Trash") {
+                Task { await store.trash([id]) }
+            }
+            .accessibilityAction(named: "Open in New Window") { store.openInWindow(id) }
+    }
+
+    private func swipes(_ content: some View) -> some View {
+        let id = conversation.id
+        let unread = conversation.email.isUnread
+        return content
+            .swipeActions(edge: .leading) {
+                Button {
+                    Task { await store.setRead([id], unread) }
+                } label: {
+                    Label(unread ? "Read" : "Unread", systemImage: unread ? "envelope.open" : "envelope.badge")
+                }
+                .tint(.blue)
+            }
+            .swipeActions(edge: .trailing) {
+                Button(role: .destructive) {
+                    Task { await store.trash([id]) }
+                } label: {
+                    Label("Trash", systemImage: "trash")
+                }
+                if !["archive", "drafts", "sent"].contains(store.currentRole ?? "") {
+                    Button {
+                        Task { await store.archive([id]) }
+                    } label: {
+                        Label("Archive", systemImage: "archivebox")
+                    }
+                    .tint(.indigo)
+                }
+            }
     }
 }
 
