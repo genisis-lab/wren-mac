@@ -9,7 +9,7 @@ options:
 settings:
   base:
     SWIFT_VERSION: "5.0"
-    MARKETING_VERSION: 0.1.0
+    MARKETING_VERSION: 0.1.1
     CURRENT_PROJECT_VERSION: 1
     # Signed for this Mac only unless bundle.sh (or Xcode) is given a team and certificate.
     CODE_SIGN_STYLE: Manual
@@ -17,9 +17,9 @@ settings:
     DEVELOPMENT_TEAM: ""
     ENABLE_DEBUG_DYLIB: NO
     DEAD_CODE_STRIPPING: YES
-    # Sparkle's public key (SUPublicEDKey), from `generate_keys` (README.md, Releases). Paste it here, or set the
-    # SPARKLE_PUBLIC_KEY repository variable, which the release workflow uses instead. Without it, no updates.
-    SPARKLE_PUBLIC_KEY: ""
+    # Sparkle update public key; the matching private key is in the SPARKLE_PRIVATE_KEY Actions secret.
+    # Keep this key stable so existing installations continue to trust future updates.
+    SPARKLE_PUBLIC_KEY: "MGMTOS3YdpflkhZ+/tZojwIiV0A4BulCEz5CiBlx3t8="
 packages:
   WrenKit:
     path: .

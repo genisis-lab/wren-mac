@@ -320,6 +320,7 @@
 				};
 			};
 			buildConfigurationList = 797F8532C4299549522E50B0 /* Build configuration list for PBXProject "Wren" */;
+			compatibilityVersion = "Xcode 14.0";
 			developmentRegion = en;
 			hasScannedForEncodings = 0;
 			knownRegions = (
@@ -333,13 +334,12 @@
 				C242ACEB4BC744F5677E3821 /* XCLocalSwiftPackageReference "." */,
 			);
 			preferredProjectObjectVersion = 77;
-			productRefGroup = 6E6B530D709AD1D42E0FB791 /* Products */;
 			projectDirPath = "";
 			projectRoot = "";
 			targets = (
 				F7E372FDBBEC3D562BD8C06D /* Wren */,
-				653B0294A9E1BDC8FDFF18B1 /* WrenWidget */,
 				E9F5AC3E1D236C14E9A09F58 /* WrenShare */,
+				653B0294A9E1BDC8FDFF18B1 /* WrenWidget */,
 			);
 		};
 /* End PBXProject section */
@@ -529,13 +529,13 @@
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
 				MACOSX_DEPLOYMENT_TARGET = 14.0;
-				MARKETING_VERSION = 0.1.0;
+				MARKETING_VERSION = 0.1.1;
 				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
 				MTL_FAST_MATH = YES;
 				ONLY_ACTIVE_ARCH = YES;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = macosx;
-				SPARKLE_PUBLIC_KEY = "";
+				SPARKLE_PUBLIC_KEY = "MGMTOS3YdpflkhZ+/tZojwIiV0A4BulCEz5CiBlx3t8=";
 				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
 				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
 				SWIFT_VERSION = 5.0;
@@ -610,12 +610,12 @@
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
 				MACOSX_DEPLOYMENT_TARGET = 14.0;
-				MARKETING_VERSION = 0.1.0;
+				MARKETING_VERSION = 0.1.1;
 				MTL_ENABLE_DEBUG_INFO = NO;
 				MTL_FAST_MATH = YES;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = macosx;
-				SPARKLE_PUBLIC_KEY = "";
+				SPARKLE_PUBLIC_KEY = "MGMTOS3YdpflkhZ+/tZojwIiV0A4BulCEz5CiBlx3t8=";
 				SWIFT_COMPILATION_MODE = wholemodule;
 				SWIFT_OPTIMIZATION_LEVEL = "-O";
 				SWIFT_VERSION = 5.0;

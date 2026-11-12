@@ -30,6 +30,7 @@ struct SettingsView: View {
 
 struct GeneralSettings: View {
     @State private var current = GeneralSettings.defaultApp
+    private let updates = Updates.shared
 
     /// The app that opens mailto: links now.
     private static var defaultApp: URL? {
@@ -53,6 +54,18 @@ struct GeneralSettings: View {
             Text("Email links in other apps and on the web open a new message in your default email app.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
+            Section("Updates") {
+                Toggle("Automatically check for updates", isOn: Binding(
+                    get: { updates.automaticallyChecks },
+                    set: { updates.setAutomaticallyChecks($0) }
+                ))
+                .disabled(!updates.isConfigured)
+                Text("Checks GitHub hourly while Wren is running. You choose when to install an update.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Button("Check for Updates…") { updates.check() }
+                    .disabled(!updates.canCheck)
+            }
         }
         .formStyle(.grouped)
         .fixedSize(horizontal: false, vertical: true)

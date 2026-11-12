@@ -1,7 +1,7 @@
 import Sparkle
 import SwiftUI
 
-/// Updates with Sparkle 2: Check for Updates… in the Wren menu, and Sparkle's own daily check once you allow it.
+/// Updates with Sparkle 2: Check for Updates… in the Wren menu, and hourly automatic checks.
 /// The feed is the newest GitHub release's appcast.xml (SUFeedURL), and an update must be signed with the key whose
 /// public half is SUPublicEDKey (README.md, Releases).
 @MainActor @Observable
@@ -9,8 +9,11 @@ final class Updates {
     static let shared = Updates()
 
     private(set) var canCheck = false
+    private(set) var automaticallyChecks = false
+    var isConfigured: Bool { controller != nil }
     private let controller: SPUStandardUpdaterController?
     @ObservationIgnored private var watching: NSKeyValueObservation?
+    @ObservationIgnored private var watchingAutomaticChecks: NSKeyValueObservation?
 
     private init() {
         // Off in debug builds (so the screenshot run never sees Sparkle's questions), and without a public key,
@@ -21,10 +24,20 @@ final class Updates {
         let configured = (Bundle.main.object(forInfoDictionaryKey: "SUPublicEDKey") as? String)?.isEmpty == false
         #endif
         controller = configured ? SPUStandardUpdaterController(startingUpdater: true, updaterDelegate: nil, userDriverDelegate: nil) : nil
+        automaticallyChecks = controller?.updater.automaticallyChecksForUpdates ?? false
+        watchingAutomaticChecks = controller?.updater.observe(\.automaticallyChecksForUpdates, options: [.new]) { [weak self] updater, _ in
+            let enabled = updater.automaticallyChecksForUpdates
+            Task { @MainActor in self?.automaticallyChecks = enabled }
+        }
         watching = controller?.updater.observe(\.canCheckForUpdates, options: [.initial, .new]) { [weak self] updater, _ in
             let can = updater.canCheckForUpdates
             Task { @MainActor in self?.canCheck = can }
         }
+    }
+
+    func setAutomaticallyChecks(_ enabled: Bool) {
+        controller?.updater.automaticallyChecksForUpdates = enabled
+        automaticallyChecks = enabled
     }
 
     func check() {

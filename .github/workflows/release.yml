@@ -1,171 +1,81 @@
 name: Release
-# Pushing a tag such as v1.2.0 builds Wren 1.2.0, signs it with your Developer ID (hardened runtime), has Apple
-# notarize it, staples the ticket and publishes a GitHub release with Wren-1.2.0.zip. With a Sparkle key it also
-# publishes appcast.xml, which the app checks for updates (README.md, Releases, has the setup).
+# Every tested main build is an update; version tags and manual runs are also supported.
 on:
   push:
+    branches: [main]
     tags: ['v*']
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: wren-release
+  cancel-in-progress: false
 defaults:
   run:
     shell: bash
 jobs:
-  secrets:
-    runs-on: ubuntu-latest
-    outputs:
-      ready: ${{ steps.check.outputs.ready }}
-    steps:
-      - id: check
-        env:
-          MACOS_CERTIFICATE: ${{ secrets.MACOS_CERTIFICATE }}
-          MACOS_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-          NOTARY_KEY: ${{ secrets.NOTARY_KEY }}
-          NOTARY_KEY_ID: ${{ secrets.NOTARY_KEY_ID }}
-          NOTARY_ISSUER_ID: ${{ secrets.NOTARY_ISSUER_ID }}
-          APPLE_ID: ${{ secrets.APPLE_ID }}
-          APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
-        run: |
-          missing=()
-          for name in MACOS_CERTIFICATE MACOS_CERTIFICATE_PASSWORD APPLE_TEAM_ID; do [ -n "${!name}" ] || missing+=("$name"); done
-          if ! { [ -n "$NOTARY_KEY" ] && [ -n "$NOTARY_KEY_ID" ] && [ -n "$NOTARY_ISSUER_ID" ]; } && ! { [ -n "$APPLE_ID" ] && [ -n "$APPLE_APP_PASSWORD" ]; }; then
-            missing+=("NOTARY_KEY, NOTARY_KEY_ID and NOTARY_ISSUER_ID (or APPLE_ID and APPLE_APP_PASSWORD)")
-          fi
-          if [ ${#missing[@]} -gt 0 ]; then
-            echo "::notice title=No release made::Signing and notarizing need these repository secrets: ${missing[*]}. README.md, Releases, says how to make them."
-            echo "ready=false" >> "$GITHUB_OUTPUT"
-          else
-            echo "ready=true" >> "$GITHUB_OUTPUT"
-          fi
-
   release:
-    needs: secrets
-    if: needs.secrets.outputs.ready == 'true'
+    if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')
     runs-on: macos-15
-    timeout-minutes: 60
+    timeout-minutes: 45
     permissions:
       contents: write
-    env:
-      SPARKLE_VERSION: 2.10.1
     steps:
       - uses: actions/checkout@v7
-      - name: Version from the tag
+      - name: Check update signing configuration
+        env:
+          SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}
         run: |
-          version=${GITHUB_REF_NAME#v}
-          [[ $version =~ ^[0-9]+(\.[0-9]+){1,2}(-[0-9A-Za-z.]+)?$ ]] || { echo "::error::The tag should look like v1.2.0, not $GITHUB_REF_NAME"; exit 1; }
+          test -n "$SPARKLE_PRIVATE_KEY" || { echo '::error::Set the SPARKLE_PRIVATE_KEY repository secret before publishing updates.'; exit 1; }
+      - name: Version and build number
+        env:
+          REF_TYPE: ${{ github.ref_type }}
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          version=$(sed -n 's/^[[:space:]]*MARKETING_VERSION: //p' project.yml)
+          if [ "$REF_TYPE" = tag ]; then version=${REF_NAME#v}; fi
+          [[ $version =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo '::error::Use a numeric version such as v0.2.0.'; exit 1; }
+          # Run IDs are unique and increase across workflows; retries retain the same release.
           echo "VERSION=$version" >> "$GITHUB_ENV"
-          # Sparkle compares build numbers, so each release's is higher than the last.
-          echo "BUILD=$GITHUB_RUN_NUMBER" >> "$GITHUB_ENV"
-      - name: Put the Developer ID certificate in a keychain of its own
-        env:
-          MACOS_CERTIFICATE: ${{ secrets.MACOS_CERTIFICATE }}
-          MACOS_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
-        run: |
-          keychain=$RUNNER_TEMP/release.keychain-db
-          password=$(uuidgen)
-          echo "$MACOS_CERTIFICATE" | base64 --decode > "$RUNNER_TEMP/certificate.p12"
-          security create-keychain -p "$password" "$keychain"
-          security set-keychain-settings -lut 3600 "$keychain"
-          security unlock-keychain -p "$password" "$keychain"
-          security import "$RUNNER_TEMP/certificate.p12" -P "$MACOS_CERTIFICATE_PASSWORD" -k "$keychain" -T /usr/bin/codesign
-          rm "$RUNNER_TEMP/certificate.p12"
-          # The intermediate certificate, in case the export left it out.
-          curl -fsSL https://www.apple.com/certificateauthority/DeveloperIDG2CA.cer -o "$RUNNER_TEMP/DeveloperIDG2CA.cer"
-          security import "$RUNNER_TEMP/DeveloperIDG2CA.cer" -k "$keychain" || true
-          security set-key-partition-list -S apple-tool:,apple: -s -k "$password" "$keychain" > /dev/null
-          security list-keychains -d user -s "$keychain" $(security list-keychains -d user | tr -d '"')
-          security find-identity -v -p codesigning "$keychain" | grep -q "Developer ID Application" \
-            || { echo "::error::MACOS_CERTIFICATE has no Developer ID Application certificate with its private key"; exit 1; }
-      - name: Build, signed with the Developer ID and the hardened runtime
-        env:
-          TEAM: ${{ secrets.APPLE_TEAM_ID }}
-          SPARKLE_PUBLIC_KEY: ${{ vars.SPARKLE_PUBLIC_KEY }}
+          echo "BUILD=$GITHUB_RUN_ID" >> "$GITHUB_ENV"
+          tag="build-$GITHUB_RUN_ID"
+          if [ "$REF_TYPE" = tag ]; then tag=$REF_NAME; fi
+          echo "RELEASE_TAG=$tag" >> "$GITHUB_ENV"
+      - name: Test the mail engine
+        run: swift test
+      - name: Generate project and build universal app
         run: |
           HOMEBREW_NO_AUTO_UPDATE=1 brew install xcodegen
           xcodegen generate
-          key=()
-          [ -n "$SPARKLE_PUBLIC_KEY" ] && key=(SPARKLE_PUBLIC_KEY="$SPARKLE_PUBLIC_KEY")
-          SIGN_IDENTITY="Developer ID Application" ./bundle.sh MARKETING_VERSION="$VERSION" CURRENT_PROJECT_VERSION="$BUILD" "${key[@]}"
-          # Sparkle's helpers inside its framework get the same signature, inside out, then the app around them
-          # (Sparkle's documented order for apps signed outside Xcode's export).
-          sparkle=build/Wren.app/Contents/Frameworks/Sparkle.framework
-          sign() { codesign --force --sign "Developer ID Application" --options runtime --timestamp "$@"; }
-          for helper in "$sparkle"/Versions/B/XPCServices/*.xpc "$sparkle/Versions/B/Autoupdate" "$sparkle/Versions/B/Updater.app"; do
-            if [ -e "$helper" ]; then sign --preserve-metadata=entitlements "$helper"; fi
-          done
-          sign "$sparkle"
-          sign --preserve-metadata=entitlements,requirements,flags build/Wren.app
+          ./bundle.sh MARKETING_VERSION="$VERSION" CURRENT_PROJECT_VERSION="$BUILD" 'ARCHS=arm64 x86_64' ONLY_ACTIVE_ARCH=NO
           codesign --verify --deep --strict --verbose=2 build/Wren.app
-      - name: Notarize and staple
-        env:
-          TEAM: ${{ secrets.APPLE_TEAM_ID }}
-          NOTARY_KEY: ${{ secrets.NOTARY_KEY }}
-          NOTARY_KEY_ID: ${{ secrets.NOTARY_KEY_ID }}
-          NOTARY_ISSUER_ID: ${{ secrets.NOTARY_ISSUER_ID }}
-          APPLE_ID: ${{ secrets.APPLE_ID }}
-          APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
-        run: |
-          if [ -n "$NOTARY_KEY" ] && [ -n "$NOTARY_KEY_ID" ] && [ -n "$NOTARY_ISSUER_ID" ]; then
-            printf '%s\n' "$NOTARY_KEY" > "$RUNNER_TEMP/notary.p8"
-            auth=(--key "$RUNNER_TEMP/notary.p8" --key-id "$NOTARY_KEY_ID" --issuer "$NOTARY_ISSUER_ID")
-          else
-            auth=(--apple-id "$APPLE_ID" --password "$APPLE_APP_PASSWORD" --team-id "$TEAM")
-          fi
-          ditto -c -k --keepParent build/Wren.app "$RUNNER_TEMP/Wren-notarize.zip"
-          xcrun notarytool submit "$RUNNER_TEMP/Wren-notarize.zip" "${auth[@]}" --wait --timeout 45m --output-format json | tee "$RUNNER_TEMP/notary.json"
-          id=$(plutil -extract id raw "$RUNNER_TEMP/notary.json" 2>/dev/null || true)
-          status=$(plutil -extract status raw "$RUNNER_TEMP/notary.json" 2>/dev/null || true)
-          rm -f "$RUNNER_TEMP/notary.p8"
-          if [ "$status" != "Accepted" ]; then
-            [ -n "$id" ] && xcrun notarytool log "$id" "${auth[@]}" || true
-            echo "::error::Apple didn't notarize the app (status: ${status:-unknown}); its log is above"
-            exit 1
-          fi
-          xcrun stapler staple build/Wren.app
-          spctl --assess --type execute --verbose=2 build/Wren.app
-          ditto -c -k --keepParent build/Wren.app "Wren-$VERSION.zip"
-      - name: Sign the update for Sparkle and write the appcast
+          lipo -verify_arch arm64 x86_64 build/Wren.app/Contents/MacOS/Wren
+      - name: Sign archive and feed with Sparkle
         env:
           SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}
-          SPARKLE_PUBLIC_KEY: ${{ vars.SPARKLE_PUBLIC_KEY }}
         run: |
-          if [ -z "$SPARKLE_PRIVATE_KEY" ]; then
-            echo "::notice title=No appcast::Add the SPARKLE_PRIVATE_KEY secret (README.md, Releases) for apps to be offered this release as an update."
-            exit 0
-          fi
-          [ -n "$(/usr/libexec/PlistBuddy -c 'Print :SUPublicEDKey' build/Wren.app/Contents/Info.plist 2>/dev/null)" ] \
-            || echo "::warning::This build has no SUPublicEDKey (the SPARKLE_PUBLIC_KEY variable or project.yml), so it can't check for updates itself."
-          mkdir -p "$RUNNER_TEMP/sparkle"
-          curl -fsSL "https://github.com/sparkle-project/Sparkle/releases/download/$SPARKLE_VERSION/Sparkle-$SPARKLE_VERSION.tar.xz" | tar -xJ -C "$RUNNER_TEMP/sparkle"
-          signature=$(printf '%s' "$SPARKLE_PRIVATE_KEY" | "$RUNNER_TEMP/sparkle/bin/sign_update" --ed-key-file - "Wren-$VERSION.zip")
-          [[ $signature == sparkle:edSignature=* ]] || { echo "::error::sign_update didn't sign the zip: $signature"; exit 1; }
-          url="https://github.com/$GITHUB_REPOSITORY/releases/download/$GITHUB_REF_NAME/Wren-$VERSION.zip"
-          cat > appcast.xml <<EOF
-          <?xml version="1.0" encoding="utf-8"?>
-          <rss version="2.0" xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle">
-            <channel>
-              <title>Wren for Mac</title>
-              <item>
-                <title>Wren $VERSION</title>
-                <pubDate>$(LC_ALL=C date -u "+%a, %d %b %Y %H:%M:%S +0000")</pubDate>
-                <sparkle:version>$BUILD</sparkle:version>
-                <sparkle:shortVersionString>$VERSION</sparkle:shortVersionString>
-                <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
-                <sparkle:fullReleaseNotesLink>https://github.com/$GITHUB_REPOSITORY/releases/tag/$GITHUB_REF_NAME</sparkle:fullReleaseNotesLink>
-                <enclosure url="$url" type="application/octet-stream" $signature />
-              </item>
-            </channel>
-          </rss>
-          EOF
-          cat appcast.xml
-      - name: Publish the release
+          sparkle_tools=$(find build/DerivedData -path '*/artifacts/sparkle/Sparkle/bin/sign_update' -print -quit)
+          test -x "$sparkle_tools"
+          archive="Wren-$VERSION-$BUILD.zip"
+          ditto -c -k --keepParent build/Wren.app "$archive"
+          signature=$(printf '%s' "$SPARKLE_PRIVATE_KEY" | "$sparkle_tools" --ed-key-file - "$archive")
+          [[ $signature == sparkle:edSignature=* ]] || { echo '::error::Sparkle did not sign the archive'; exit 1; }
+          export ARCHIVE="$archive" SIGNATURE="$signature"
+          python3 scripts/write-appcast.py
+          printf '%s' "$SPARKLE_PRIVATE_KEY" | "$sparkle_tools" --ed-key-file - appcast.xml
+          # Verify both signatures with the public key embedded in the built app.
+          python3 scripts/verify-update.py appcast.xml "$archive" build/Wren.app/Contents/Info.plist "$sparkle_tools"
+      - name: Publish release after all checks pass
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          files=("Wren-$VERSION.zip")
-          [ -f appcast.xml ] && files+=(appcast.xml)
-          # A version like 1.2.0-beta.1 is a pre-release, which the app's feed (the latest release) skips.
-          pre=(); [[ $VERSION == *-* ]] && pre=(--prerelease)
-          gh release create "$GITHUB_REF_NAME" "${files[@]}" --title "Wren $VERSION" --generate-notes --verify-tag "${pre[@]}"
-      - name: Remove the keychain
-        if: always()
-        run: security delete-keychain "$RUNNER_TEMP/release.keychain-db" || true
+          archive="Wren-$VERSION-$BUILD.zip"
+          if ! gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            gh release create "$RELEASE_TAG" --target "$GITHUB_SHA" --draft --title "Wren $VERSION (build $BUILD)" --notes-file release-notes.md
+          fi
+          gh release upload "$RELEASE_TAG" "$archive" appcast.xml --clobber
+          # A retry of an older run must not replace a newer update as latest.
+          latest_build=$(gh api "repos/$GITHUB_REPOSITORY/releases/latest" --jq '.assets[].name' 2>/dev/null | sed -nE 's/^Wren-[0-9.]+-([0-9]+)\.zip$/\1/p' || true)
+          latest=true
+          if [ -n "$latest_build" ] && [ "$latest_build" -gt "$BUILD" ]; then latest=false; fi
+          gh release edit "$RELEASE_TAG" --draft=false --latest="$latest"
