@@ -10,7 +10,9 @@ struct ConversationList: View {
         let showRecipients = store.currentRole == "sent" || store.currentRole == "drafts"
         List(selection: $store.selectedThreads) {
             ForEach(store.conversations) { conversation in
-                ConversationRow(conversation: conversation, showRecipients: showRecipients)
+                // Searching all mail: which mailbox each one is in.
+                let folder = store.searchingEverywhere ? store.mailbox(store.place(of: conversation.id))?.name : nil
+                ConversationRow(conversation: conversation, showRecipients: showRecipients, folder: folder)
                     .tag(conversation.id)
                     // Onto a sidebar mailbox or label (the whole selection, when this row is in it).
                     .draggable(store.dragPayload(for: conversation.id))
@@ -47,8 +49,13 @@ struct ConversationList: View {
             MessageActions(ids: ids)
         } primaryAction: { ids in
             // Double-clicking a draft opens it to keep writing, as in Mail.
-            guard ids.count == 1, let id = ids.first, store.currentRole == "drafts" else { return }
-            Task { if let d = await store.draftToEdit(inThread: id) { openWindow(id: "compose", value: d) } }
+            // Double-clicking a draft opens it to keep writing; anything else opens in a window of its own, as in Mail.
+            guard ids.count == 1, let id = ids.first else { return }
+            if store.currentRole == "drafts" {
+                Task { if let d = await store.draftToEdit(inThread: id) { openWindow(id: "compose", value: d) } }
+            } else {
+                store.openInWindow(id)
+            }
         }
         .onDeleteCommand {
             let ids = store.selectedThreads
@@ -88,7 +95,7 @@ struct ConversationList: View {
             }
         }
         .task(id: store.selectedMailbox) { await store.showMailbox() }
-        .task(id: store.search) {
+        .task(id: "\(store.searchScope) \(store.search)") {
             // Search as you type, once typing pauses.
             try? await Task.sleep(for: .milliseconds(300))
             if !Task.isCancelled { await store.loadList() }
@@ -131,6 +138,7 @@ struct LoadMoreRow: View {
 struct ConversationRow: View {
     let conversation: Conversation
     let showRecipients: Bool
+    var folder: String? = nil
 
     private var email: Email { conversation.email }
 
@@ -168,6 +176,13 @@ struct ConversationRow: View {
                     }
                     if email.hasAttachment == true {
                         Image(systemName: "paperclip").imageScale(.small).foregroundStyle(.secondary)
+                    }
+                    if let folder {
+                        Text(folder)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .padding(.horizontal, 5)
+                            .background(.quaternary.opacity(0.6), in: Capsule())
                     }
                     Text(listDate(email.receivedAt))
                         .font(.subheadline)
@@ -207,6 +222,7 @@ struct ConversationRow: View {
         parts.append(subject)
         if conversation.count > 1 { parts.append("\(conversation.count) messages") }
         if email.hasAttachment == true { parts.append("Has attachments") }
+        if let folder { parts.append("In \(folder)") }
         parts.append(listDate(email.receivedAt))
         if let preview = email.preview, !preview.isEmpty { parts.append(preview) }
         return parts.joined(separator: ", ")

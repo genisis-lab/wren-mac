@@ -8,7 +8,7 @@ import WidgetKit
 import WrenKit
 
 /// A mailbox: which sign-in, which account in it (your own, or a shared mailbox), and which mailbox.
-struct MailboxRef: Hashable {
+struct MailboxRef: Hashable, Codable {
     var login: String
     var account: String
     var mailbox: String
@@ -66,6 +66,17 @@ final class Login: Identifiable {
     }
 }
 
+/// A conversation in a window of its own: where it is, and which.
+struct OpenConversation: Codable, Hashable {
+    var place: MailboxRef
+    var threadId: String
+}
+
+extension EnvironmentValues {
+    /// Where the conversation being shown is, in a conversation window; nil in the main window's reader.
+    @Entry var conversationPlace: MailboxRef? = nil
+}
+
 /// A label being named in the label sheet.
 struct LabelEdit: Identifiable {
     var login: String
@@ -106,6 +117,13 @@ final class MailStore {
     var selectedMailbox: MailboxRef?
     var selectedThreads: Set<String> = []
     var search = ""
+    /// Where a search looks: the mailbox being shown, or all mail in every account (but Trash and Junk).
+    var searchScope = SearchScope.mailbox
+
+    enum SearchScope: Hashable { case mailbox, everywhere }
+
+    /// A search of all mail is showing, so each row may be from a different mailbox.
+    var searchingEverywhere: Bool { searchScope == .everywhere && !search.trimmingCharacters(in: .whitespaces).isEmpty }
     /// Only conversations with unread mail (until another mailbox is chosen).
     private(set) var unreadOnly = false
     /// Goes up when the list starts over with other rows. The list is made afresh then: changing a table row by row
@@ -214,7 +232,7 @@ final class MailStore {
 
     /// Where a conversation in the list lives: the mailbox being shown, or in All Inboxes, its own Inbox.
     func place(of threadId: String) -> MailboxRef? {
-        selectedMailbox == .allInboxes ? rowPlaces[threadId] : selectedMailbox
+        selectedMailbox == .allInboxes || searchingEverywhere ? rowPlaces[threadId] : selectedMailbox
     }
 
     private func places(_ ids: Set<String>) -> [MailboxRef: Set<String>] {
@@ -403,7 +421,11 @@ final class MailStore {
         }
     }
 
+    /// Goes up after each reload, so a conversation in a window of its own loads again too.
+    private(set) var reloads = 0
+
     private func reload(_ only: [Login]?) async {
+        defer { reloads += 1 }
         for login in only ?? logins {
             do {
                 for account in login.accounts { login.mailboxes[account.id] = try await login.client.mailboxes(account: account.id) }
@@ -460,7 +482,29 @@ final class MailStore {
         var rows: [(conversation: Conversation, place: MailboxRef)] = []
         var total = 0
         var loaded = false
-        for place in ref == .allInboxes ? inboxes : [ref] {
+        let everywhere = searchingEverywhere
+        if everywhere {
+            // Every account of every sign-in; each row lives in the folder its message is in.
+            for login in logins {
+                for account in login.accounts {
+                    let boxes = login.mailboxes[account.id] ?? []
+                    let skip = boxes.filter { ["trash", "junk"].contains($0.role ?? "") }.map(\.id)
+                    let folders = boxes.filter { $0.role != nil }
+                    do {
+                        let page = try await login.client.conversations(account: account.id, mailbox: nil, excluding: skip, search: search, unreadOnly: unreadOnly, limit: limit)
+                        for c in page.list {
+                            let folder = folders.first { c.email.mailboxIds[$0.id] == true } ?? folders.first { $0.role == "inbox" }
+                            rows.append((c, MailboxRef(login: login.id, account: account.id, mailbox: folder?.id ?? "")))
+                        }
+                        total += page.total
+                        loaded = true
+                    } catch {
+                        login.problem = error.localizedDescription
+                    }
+                }
+            }
+        }
+        for place in everywhere ? [] : ref == .allInboxes ? inboxes : [ref] {
             guard let login = login(place.login) else { continue }
             do {
                 let page = try await login.client.conversations(account: place.account, mailbox: place.mailbox, search: search, unreadOnly: unreadOnly, limit: limit)
@@ -483,7 +527,7 @@ final class MailStore {
         }
         // A newer load (another mailbox, a longer search) has started since, or nothing could be loaded at all.
         guard generation == listGeneration, loaded else { return }
-        if ref == .allInboxes {
+        if ref == .allInboxes || everywhere {
             rows.sort { ($0.conversation.email.receivedAt ?? .distantPast) > ($1.conversation.email.receivedAt ?? .distantPast) }
         }
         rows = Array(rows.prefix(limit))
@@ -557,6 +601,18 @@ final class MailStore {
         return emails.filter { email in showTrash || trash.map { email.mailboxIds[$0] != true } ?? true }
     }
 
+    /// A conversation from the list in a window of its own.
+    func openInWindow(_ id: String) {
+        guard let place = place(of: id) else { return }
+        openWindow?(id: "conversation", value: OpenConversation(place: place, threadId: id))
+    }
+
+    /// The messages of a conversation in a window of its own (the Trash's hidden, unless it's in the Trash).
+    func messages(_ c: OpenConversation) async throws -> [Email] {
+        guard let login = login(c.place.login) else { throw NotConnected() }
+        return visible(try await login.client.conversation(account: c.place.account, threadId: c.threadId), in: c.place)
+    }
+
     /// Bring up a conversation in a mailbox, such as new mail whose notification was clicked.
     func show(_ threadId: String, in ref: MailboxRef) {
         search = ""
@@ -626,7 +682,9 @@ final class MailStore {
     }
 
     /// To the Trash; in the Trash, delete for good after asking.
-    func trash(_ ids: Set<String>) async {
+    func trash(_ ids: Set<String>, in place: MailboxRef? = nil) async {
+        // From a conversation window, never from the Trash itself (it has no Delete Forever).
+        if let place { return await move(ids, in: place, to: "trash", actionName: "Move to Trash") }
         if currentRole == "trash" { confirmingDelete = ids } else { await move(ids, to: "trash", actionName: "Move to Trash") }
     }
 
@@ -868,7 +926,7 @@ final class MailStore {
     func canDrop(on ref: MailboxRef) -> Bool {
         guard ref != .allInboxes, ref != selectedMailbox, let target = mailbox(ref) else { return false }
         if ["drafts", "sent", "snoozed"].contains(target.role ?? "") { return false }
-        let from = selectedMailbox == .allInboxes ? Set(rowPlaces.values.map { "\($0.login) \($0.account)" }) : Set([selectedMailbox].compactMap { $0.map { "\($0.login) \($0.account)" } })
+        let from = selectedMailbox == .allInboxes || searchingEverywhere ? Set(rowPlaces.values.map { "\($0.login) \($0.account)" }) : Set([selectedMailbox].compactMap { $0.map { "\($0.login) \($0.account)" } })
         return from.contains("\(ref.login) \(ref.account)")
     }
 
@@ -955,14 +1013,15 @@ final class MailStore {
         draft(in: writingPlace) { .new(account: $0, identity: $1.first, to: to) }
     }
 
-    func replyDraft(to email: Email? = nil, all: Bool) -> Draft? {
+    /// `place` is where the conversation is, for one in a window of its own; otherwise the reader's.
+    func replyDraft(to email: Email? = nil, all: Bool, in place: MailboxRef? = nil) -> Draft? {
         guard let email = email ?? replyTarget else { return nil }
-        return encrypted(email) { email in draft(in: threadPlace) { .reply(to: email, all: all, account: $0, identities: $1) } }
+        return encrypted(email) { email in draft(in: place ?? threadPlace) { .reply(to: email, all: all, account: $0, identities: $1) } }
     }
 
-    func forwardDraft(of email: Email? = nil) -> Draft? {
+    func forwardDraft(of email: Email? = nil, in place: MailboxRef? = nil) -> Draft? {
         guard let email = email ?? replyTarget else { return nil }
-        return encrypted(email) { email in draft(in: threadPlace) { .forward(email, account: $0, identities: $1) } }
+        return encrypted(email) { email in draft(in: place ?? threadPlace) { .forward(email, account: $0, identities: $1) } }
     }
 
     /// Answering encrypted mail: quoted as it was decrypted (when it was), and encrypted again by default.
@@ -980,8 +1039,8 @@ final class MailStore {
         decrypted = [:]
     }
 
-    func editDraft(_ email: Email) -> Draft? {
-        draft(in: threadPlace) { .editing(email, account: $0, identities: $1) }
+    func editDraft(_ email: Email, in place: MailboxRef? = nil) -> Draft? {
+        draft(in: place ?? threadPlace) { .editing(email, account: $0, identities: $1) }
     }
 
     /// The draft in a conversation in the list, to keep writing it; fetched when the reader hasn't loaded it yet.
@@ -1106,8 +1165,10 @@ final class MailStore {
 
     /// Whether the conversation being read is in an account that can send (not a shared mailbox you can only read).
     /// Wren's session says; with an older server it's learned when an answer is refused.
-    var canSendHere: Bool {
-        guard let place = threadPlace else { return false }
+    var canSendHere: Bool { canSend(in: nil) }
+
+    func canSend(in place: MailboxRef?) -> Bool {
+        guard let place = place ?? threadPlace else { return false }
         if readOnly.contains("\(place.login) \(place.account)") { return false }
         return login(place.login)?.accounts.first { $0.id == place.account }?.canSend ?? true
     }
@@ -1116,8 +1177,8 @@ final class MailStore {
 
     /// Unsubscribe from the list a message came from; Wren asks the list, or writes to it. When the list only has
     /// a page for it, that's what comes back to open.
-    func unsubscribe(_ email: Email) async throws -> Unsubscribed {
-        guard let place = threadPlace, let login = login(place.login) else { throw NotConnected() }
+    func unsubscribe(_ email: Email, in place: MailboxRef? = nil) async throws -> Unsubscribed {
+        guard let place = place ?? threadPlace, let login = login(place.login) else { throw NotConnected() }
         let done = try await login.client.unsubscribe(from: email.id, account: place.account)
         let sender = email.from?.first?.email.lowercased()
         for i in thread.indices where thread[i].from?.first?.email.lowercased() == sender { thread[i].unsubscribed = true }
@@ -1126,8 +1187,8 @@ final class MailStore {
 
     /// Accept, maybe or decline the invitation in an email; the organizer gets the answer from Wren.
     /// Returns who the answer went to.
-    func answer(_ email: Email, _ answer: Invite.Answer, comment: String) async throws -> String? {
-        guard let place = threadPlace, let login = login(place.login) else { throw NotConnected() }
+    func answer(_ email: Email, _ answer: Invite.Answer, comment: String, in place: MailboxRef? = nil) async throws -> String? {
+        guard let place = place ?? threadPlace, let login = login(place.login) else { throw NotConnected() }
         let to: String?
         do {
             to = try await login.client.answer(invite: email.id, answer, comment: comment, account: place.account)
@@ -1233,13 +1294,15 @@ final class MailStore {
     // MARK: Attachments
 
     /// The open conversation's sign-in and account, where its files come from.
-    var fileSource: (client: JMAPClient, account: String)? {
-        guard let place = threadPlace, let login = login(place.login) else { return nil }
+    var fileSource: (client: JMAPClient, account: String)? { fileSource(in: nil) }
+
+    func fileSource(in place: MailboxRef?) -> (client: JMAPClient, account: String)? {
+        guard let place = place ?? threadPlace, let login = login(place.login) else { return nil }
         return (login.client, place.account)
     }
 
-    func download(_ part: BodyPart) async throws -> Data {
-        guard let source = fileSource else { throw NotConnected() }
+    func download(_ part: BodyPart, in place: MailboxRef? = nil) async throws -> Data {
+        guard let source = fileSource(in: place) else { throw NotConnected() }
         return try await source.client.download(part, account: source.account)
     }
 
@@ -1262,23 +1325,23 @@ final class MailStore {
         return url
     }
 
-    func temporaryFile(_ part: BodyPart) async throws -> URL {
-        guard let source = fileSource else { throw NotConnected() }
+    func temporaryFile(_ part: BodyPart, in place: MailboxRef? = nil) async throws -> URL {
+        guard let source = fileSource(in: place) else { throw NotConnected() }
         return try await Self.temporaryFile(part, account: source.account, client: source.client)
     }
 
     /// Open with its app.
-    func openAttachment(_ part: BodyPart) async {
+    func openAttachment(_ part: BodyPart, in place: MailboxRef? = nil) async {
         do {
-            NSWorkspace.shared.open(try await temporaryFile(part))
+            NSWorkspace.shared.open(try await temporaryFile(part, in: place))
         } catch {
             alert = error.localizedDescription
         }
     }
 
-    func saveAttachment(_ part: BodyPart) async {
+    func saveAttachment(_ part: BodyPart, in place: MailboxRef? = nil) async {
         do {
-            saveToDownloads(Self.fileName(part), try await download(part))
+            saveToDownloads(Self.fileName(part), try await download(part, in: place))
         } catch {
             alert = error.localizedDescription
         }

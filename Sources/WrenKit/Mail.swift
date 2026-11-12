@@ -40,8 +40,10 @@ extension JMAPClient {
 
     /// The newest `limit` conversations in a mailbox, optionally matching a search, and how many there are in all.
     /// With `unreadOnly`, just the conversations with unread mail there.
-    public func conversations(account: String, mailbox: String, search: String = "", unreadOnly: Bool = false, limit: Int) async throws -> (list: [Conversation], total: Int) {
-        var filter: [String: JSON] = ["inMailbox": .string(mailbox)]
+    /// With `mailbox` nil, every mailbox but the ones in `excluding` (searching all mail, leaving out Trash and Junk).
+    public func conversations(account: String, mailbox: String?, excluding: [String] = [], search: String = "", unreadOnly: Bool = false, limit: Int) async throws -> (list: [Conversation], total: Int) {
+        var filter: [String: JSON] = [:]
+        if let mailbox { filter["inMailbox"] = .string(mailbox) } else if !excluding.isEmpty { filter["inMailboxOtherThan"] = .array(excluding.map(JSON.string)) }
         if unreadOnly { filter["notKeyword"] = "$seen" }
         let words = search.trimmingCharacters(in: .whitespacesAndNewlines)
         if !words.isEmpty { filter["text"] = .string(words) }

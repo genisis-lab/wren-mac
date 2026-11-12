@@ -23,6 +23,13 @@ struct WrenApp: App {
         // Links and files are the app delegate's: SwiftUI would otherwise rebuild this window for each one.
         .handlesExternalEvents(matching: [])
 
+        WindowGroup("Conversation", id: "conversation", for: OpenConversation.self) { $conversation in
+            ConversationWindow(value: $conversation)
+                .environment(store)
+        }
+        .defaultSize(width: 760, height: 640)
+        .handlesExternalEvents(matching: [])
+
         WindowGroup("New Message", id: "compose", for: Draft.self) { $draft in
             ComposeView(value: $draft)
                 .environment(store)
@@ -93,6 +100,18 @@ struct RootView: View {
     }
 }
 
+/// File → Print… (⌘P): the conversation in the focused window.
+struct PrintCommand: View {
+    let store: MailStore
+    @FocusedValue(\.printable) private var printable
+
+    var body: some View {
+        Button("Print…") { if let printable { Printer.print(printable.emails, decrypted: store.decrypted) } }
+            .keyboardShortcut("p")
+            .disabled(printable == nil)
+    }
+}
+
 struct MailCommands: Commands {
     let store: MailStore
     @Environment(\.openWindow) private var openWindow
@@ -110,7 +129,11 @@ struct MailCommands: Commands {
             Button("New Message") { if let d = store.newDraft() { openWindow(id: "compose", value: d) } }
                 .keyboardShortcut("n")
                 .disabled(!signedIn)
+            Button("Open in New Window") { if let id = selection.first { store.openInWindow(id) } }
+                .keyboardShortcut("o")
+                .disabled(selection.count != 1)
         }
+        CommandGroup(replacing: .printItem) { PrintCommand(store: store) }
         CommandMenu("Mailbox") {
             Button("Get New Mail") { Task { await store.refresh() } }
                 .keyboardShortcut("n", modifiers: [.command, .shift])

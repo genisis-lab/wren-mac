@@ -7,6 +7,7 @@ struct InviteCard: View {
     let email: Email
     let invite: Invite
     @Environment(MailStore.self) private var store
+    @Environment(\.conversationPlace) private var windowPlace
     @State private var comment = ""
     @State private var sending: Invite.Answer?
     /// The answer just sent, and who it went to, until the message is loaded again with it.
@@ -43,7 +44,7 @@ struct InviteCard: View {
                 .textSelection(.enabled)
             }
             // Only where it can be answered: not cancelled, sent by its organizer, and from an account that can send.
-            if invite.canReply == true, !invite.isCancelled, store.canSendHere {
+            if invite.canReply == true, !invite.isCancelled, store.canSend(in: windowPlace) {
                 HStack(spacing: 8) {
                     TextField("Add a comment (optional)", text: $comment)
                         .textFieldStyle(.roundedBorder)
@@ -78,7 +79,7 @@ struct InviteCard: View {
         problem = nil
         Task {
             do {
-                let to = try await store.answer(email, choice, comment: comment)
+                let to = try await store.answer(email, choice, comment: comment, in: windowPlace)
                 sent = (choice, to)
                 comment = ""
             } catch {

@@ -23,11 +23,12 @@ struct PGPMessageView: View {
     let kind: PGPKind
     @Environment(MailStore.self) private var store
     @Environment(\.openSettings) private var openSettings
+    @Environment(\.conversationPlace) private var windowPlace
     @State private var opened: PGP.Opened?
     @State private var hasKey: Bool?
     @State private var problem: String?
 
-    private var login: Login? { store.threadPlace.flatMap { store.login($0.login) } }
+    private var login: Login? { (windowPlace ?? store.threadPlace).flatMap { store.login($0.login) } }
     private var isUnlocked: Bool { login.map { PGP.shared.unlocked.contains($0.id) } ?? false }
     private var sender: String { email.from?.first?.email ?? "the sender" }
 
@@ -94,7 +95,7 @@ struct PGPMessageView: View {
         hasKey = await PGP.shared.key(login) != nil
         guard !kind.isEncrypted || PGP.shared.unlocked.contains(login.id) else { return }
         do {
-            let o = try await store.openPGP(email, kind)
+            let o = try await store.openPGP(email, kind, in: windowPlace)
             if kind.isEncrypted { store.decrypted[email.id] = o }
             opened = o
         } catch {
@@ -113,6 +114,7 @@ struct DecryptedFiles: View {
     let files: [PGP.Opened.File]
     let sealed: [BodyPart]
     @Environment(MailStore.self) private var store
+    @Environment(\.conversationPlace) private var windowPlace
 
     var body: some View {
         if !files.isEmpty || !sealed.isEmpty {
@@ -122,8 +124,8 @@ struct DecryptedFiles: View {
                 }
                 ForEach(sealed, id: \.self) { part in
                     row(String((part.name ?? "Attachment.pgp").dropLast(4)), type: "application/octet-stream", size: part.size) {
-                        guard let login = store.threadPlace.flatMap({ store.login($0.login) }) else { throw NotConnected() }
-                        return try await PGP.shared.decryptFile(store.download(part), login: login.id).data
+                        guard let login = (windowPlace ?? store.threadPlace).flatMap({ store.login($0.login) }) else { throw NotConnected() }
+                        return try await PGP.shared.decryptFile(store.download(part, in: windowPlace), login: login.id).data
                     }
                 }
             }

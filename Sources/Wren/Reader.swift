@@ -19,6 +19,7 @@ struct ReaderPane: View {
         .task(id: store.selectedThreads) {
             await store.open(store.selectedThreads.count == 1 ? store.selectedThreads.first : nil)
         }
+        .focusedSceneValue(\.printable, store.selectedThreads.count == 1 && !store.thread.isEmpty ? Printable(emails: store.thread) : nil)
         .toolbar { actions }
     }
 
@@ -124,6 +125,7 @@ struct MessageView: View {
     let expanded: Bool
     let toggle: () -> Void
     @Environment(MailStore.self) private var store
+    @Environment(\.conversationPlace) private var windowPlace
     @Environment(\.openWindow) private var openWindow
     @AppStorage("loadRemoteContent") private var loadRemoteAlways = false
     @State private var loadRemote = false
@@ -138,11 +140,11 @@ struct MessageView: View {
             }
 
             if expanded {
-                if email.isDraft, let draft = store.editDraft(email) {
+                if email.isDraft, let draft = store.editDraft(email, in: windowPlace) {
                     Button("Edit Draft") { openWindow(id: "compose", value: draft) }
                 }
                 if let invite = email.invite { InviteCard(email: email, invite: invite) }
-                if email.canUnsubscribe == true, !email.isDraft, email.unsubscribed == true || store.canSendHere { UnsubscribeRow(email: email) }
+                if email.canUnsubscribe == true, !email.isDraft, email.unsubscribed == true || store.canSend(in: windowPlace) { UnsubscribeRow(email: email) }
                 if let kind = PGPKind(email) {
                     PGPMessageView(email: email, kind: kind)
                 } else {
@@ -230,9 +232,9 @@ struct MessageView: View {
     /// Reply, Reply All and Forward for this message (the toolbar's act on the newest).
     private var messageMenu: some View {
         Menu {
-            Button("Reply") { if let d = store.replyDraft(to: email, all: false) { openWindow(id: "compose", value: d) } }
-            Button("Reply All") { if let d = store.replyDraft(to: email, all: true) { openWindow(id: "compose", value: d) } }
-            Button("Forward") { if let d = store.forwardDraft(of: email) { openWindow(id: "compose", value: d) } }
+            Button("Reply") { if let d = store.replyDraft(to: email, all: false, in: windowPlace) { openWindow(id: "compose", value: d) } }
+            Button("Reply All") { if let d = store.replyDraft(to: email, all: true, in: windowPlace) { openWindow(id: "compose", value: d) } }
+            Button("Forward") { if let d = store.forwardDraft(of: email, in: windowPlace) { openWindow(id: "compose", value: d) } }
         } label: {
             Image(systemName: "ellipsis.circle")
         }
@@ -249,6 +251,7 @@ struct MessageView: View {
 struct UnsubscribeRow: View {
     let email: Email
     @Environment(MailStore.self) private var store
+    @Environment(\.conversationPlace) private var windowPlace
     @State private var working = false
     @State private var note: String?
 
@@ -272,7 +275,7 @@ struct UnsubscribeRow: View {
         Task {
             defer { working = false }
             do {
-                let done = try await store.unsubscribe(email)
+                let done = try await store.unsubscribe(email, in: windowPlace)
                 switch done.method {
                 case "link":
                     if let url = done.url, ["http", "https"].contains(url.scheme?.lowercased() ?? "") { NSWorkspace.shared.open(url) }
@@ -298,11 +301,12 @@ struct MessageBody: View {
     let html: String?
     let allowRemote: Bool
     @Environment(MailStore.self) private var store
+    @Environment(\.conversationPlace) private var windowPlace
     @State private var height: CGFloat = 80
 
     var body: some View {
         if let html {
-            MessageWebView(html: html, allowRemote: allowRemote, inline: email.attachments ?? [], download: store.download, openLink: open, height: $height)
+            MessageWebView(html: html, allowRemote: allowRemote, inline: email.attachments ?? [], download: { [store, windowPlace] in try await store.download($0, in: windowPlace) }, openLink: open, height: $height)
                 .frame(height: height)
                 // Mail with colors of its own sits on its own page.
                 .clipShape(RoundedRectangle(cornerRadius: MessageWebView.followsAppearance(html) ? 0 : 8))
@@ -363,6 +367,7 @@ struct Avatar: View {
 struct AttachmentList: View {
     let files: [BodyPart]
     @Environment(MailStore.self) private var store
+    @Environment(\.conversationPlace) private var windowPlace
     @FocusState private var selected: BodyPart?
     @State private var preview: URL?
 
@@ -388,22 +393,22 @@ struct AttachmentList: View {
                 .focusable()
                 .focused($selected, equals: file)
                 .focusEffectDisabled()
-                .onTapGesture(count: 2) { Task { await store.openAttachment(file) } }
+                .onTapGesture(count: 2) { Task { await store.openAttachment(file, in: windowPlace) } }
                 .onTapGesture { selected = file }
                 .onKeyPress(.space) {
                     quickLook(file)
                     return .handled
                 }
-                .draggable(DraggedAttachment(part: file, account: store.fileSource?.account ?? "", client: store.fileSource?.client))
+                .draggable(DraggedAttachment(part: file, account: store.fileSource(in: windowPlace)?.account ?? "", client: store.fileSource(in: windowPlace)?.client))
                 .help(name)
                 .contextMenu {
-                    Button("Open") { Task { await store.openAttachment(file) } }
+                    Button("Open") { Task { await store.openAttachment(file, in: windowPlace) } }
                     Button("Quick Look") { quickLook(file) }
-                    Button("Save to Downloads") { Task { await store.saveAttachment(file) } }
+                    Button("Save to Downloads") { Task { await store.saveAttachment(file, in: windowPlace) } }
                 }
                 .accessibilityElement(children: .combine)
                 .accessibilityAddTraits(.isButton)
-                .accessibilityAction { Task { await store.openAttachment(file) } }
+                .accessibilityAction { Task { await store.openAttachment(file, in: windowPlace) } }
                 .accessibilityAction(named: "Quick Look") { quickLook(file) }
             }
         }
@@ -419,7 +424,7 @@ struct AttachmentList: View {
         }
         Task {
             do {
-                preview = try await store.temporaryFile(file)
+                preview = try await store.temporaryFile(file, in: windowPlace)
             } catch {
                 store.alert = error.localizedDescription
             }

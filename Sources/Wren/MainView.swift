@@ -18,6 +18,10 @@ struct MainView: View {
             ReaderPane()
         }
         .searchable(text: $store.search, placement: .toolbar, prompt: "Search")
+        .searchScopes($store.searchScope) {
+            Text("All Mailboxes").tag(MailStore.SearchScope.everywhere)
+            Text(store.mailbox(store.selectedMailbox)?.name ?? "This Mailbox").tag(MailStore.SearchScope.mailbox)
+        }
         .onAppear { store.undoManager = undoManager }
         .sheet(item: $store.labelEditor) { LabelSheet(edit: $0) }
         .confirmationDialog(
