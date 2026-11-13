@@ -188,6 +188,7 @@ final class AdminPanel {
                     return
                 }
             } catch {
+                guard !Task.isCancelled else { return }
                 self.error = error.localizedDescription
                 stage = .password
                 return

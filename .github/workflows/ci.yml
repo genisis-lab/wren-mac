@@ -10,7 +10,7 @@ defaults:
     shell: bash
 jobs:
   build:
-    runs-on: macos-15
+    runs-on: macos-15-intel
     permissions:
       contents: write
     steps:
@@ -19,6 +19,16 @@ jobs:
         run: |
           swift build --build-tests 2>&1 | tee engine.log
           swift test --skip-build
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Test the bundled PGP engine
+        working-directory: pgp
+        run: |
+          npm ci --ignore-scripts
+          npm test
+          npm run build
+          git diff --exit-code -- ../Sources/Wren/Resources/pgp.js
       - name: Test app credential storage
         run: scripts/test-app-security.sh
       - name: Make the Xcode project from project.yml

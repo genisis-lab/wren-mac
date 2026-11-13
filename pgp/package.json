@@ -1,8 +1,10 @@
 {
   "private": true,
+  "type": "module",
   "description": "The PGP engine bundled into Wren for Mac (Sources/Wren/Resources/pgp.js). Rebuild with: npm ci && npm run build",
   "scripts": {
-    "build": "esbuild engine.js --bundle --format=iife --target=safari17 --minify --legal-comments=eof --outfile=../Sources/Wren/Resources/pgp.js"
+    "build": "esbuild engine.js --bundle --format=iife --target=safari17 --minify --legal-comments=eof --outfile=../Sources/Wren/Resources/pgp.js",
+    "test": "node --test engine.test.mjs"
   },
   "dependencies": {
     "openpgp": "6.3.2",

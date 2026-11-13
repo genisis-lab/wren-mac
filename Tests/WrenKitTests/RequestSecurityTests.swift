@@ -82,5 +82,7 @@ final class RequestSecurityTests: XCTestCase {
         XCTAssertEqual(overview.users, 0)
         XCTAssertEqual(overview.activeUsers, 0)
         XCTAssertEqual(overview.suspendedUsers, 2)
+        let users = try JSONDecoder().decode([AdminUser].self, from: Data(#"[{"id":1,"email":"test@example.invalid","name":"Test","role":"user","status":"active","usedBytes":1e100,"quotaBytes":1e100}]"#.utf8))
+        XCTAssertTrue(AdminImport.export(users).contains("test@example.invalid"))
     }
 }

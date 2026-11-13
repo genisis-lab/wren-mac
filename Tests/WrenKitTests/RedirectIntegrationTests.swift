@@ -37,9 +37,14 @@ final class RedirectIntegrationTests: XCTestCase {
         let upload = folder.appendingPathComponent("upload.txt")
         try Data("fake-private-export".utf8).write(to: upload)
         for file in [nil, upload] as [URL?] {
-            let reply = try await client.transfer(file == nil ? "GET" : "POST", path: "/cross", upload: file, headers: headers)
-            defer { try? FileManager.default.removeItem(at: reply.file) }
-            XCTAssertEqual(reply.status, 307)
+            do {
+                let reply = try await client.transfer(file == nil ? "GET" : "POST", path: "/cross", upload: file, headers: headers)
+                defer { try? FileManager.default.removeItem(at: reply.file) }
+                XCTAssertEqual(reply.status, 307)
+            } catch let error as URLError {
+                // URLSession download tasks can report a refused redirect as badServerResponse.
+                XCTAssertEqual(error.code, .badServerResponse)
+            }
         }
         try await client.connect()
         do { _ = try await client.call([]); XCTFail("Followed API redirect") }

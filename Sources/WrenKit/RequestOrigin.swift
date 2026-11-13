@@ -36,6 +36,18 @@ final class ServerRedirects: NSObject, URLSessionTaskDelegate, Sendable {
     func urlSession(_ session: URLSession, task: URLSessionTask,
                     willPerformHTTPRedirection response: HTTPURLResponse, newRequest request: URLRequest,
                     completionHandler: @escaping @Sendable (URLRequest?) -> Void) {
-        completionHandler(origin.allows(request.url) ? request : nil)
+        guard origin.allows(request.url), origin.allows(task.originalRequest?.url) else {
+            completionHandler(nil)
+            return
+        }
+        // URLSession can strip Authorization even on a same-origin redirect. Restore our headers
+        // only after validating the destination, never for a different host, port or scheme.
+        var redirected = request
+        for header in ["Authorization", "X-Wren-Admin", "X-Wren"] {
+            if let value = task.originalRequest?.value(forHTTPHeaderField: header) {
+                redirected.setValue(value, forHTTPHeaderField: header)
+            }
+        }
+        completionHandler(redirected)
     }
 }

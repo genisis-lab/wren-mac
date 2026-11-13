@@ -18,7 +18,7 @@ func SecItemAdd(_ attributes: CFDictionary, _ result: UnsafeMutablePointer<CFTyp
     if addStatus == errSecSuccess { saved = (attributes as NSDictionary)[kSecValueData] as! Data }
     return addStatus
 }
-func SecItemDelete(_ query: CFDictionary) -> OSStatus {
+@discardableResult func SecItemDelete(_ query: CFDictionary) -> OSStatus {
     deletes += 1
     saved = Data()
     return errSecSuccess

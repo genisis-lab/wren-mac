@@ -43,6 +43,16 @@ jobs:
           echo "RELEASE_TAG=$tag" >> "$GITHUB_ENV"
       - name: Test the mail engine
         run: swift test
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Test the bundled PGP engine
+        working-directory: pgp
+        run: |
+          npm ci --ignore-scripts
+          npm test
+          npm run build
+          git diff --exit-code -- ../Sources/Wren/Resources/pgp.js
       - name: Test app credential storage
         run: scripts/test-app-security.sh
       - name: Generate project and build universal app
