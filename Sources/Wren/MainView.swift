@@ -191,7 +191,8 @@ struct UndoSendBar: View {
                 // Keep the countdown readable even at the sidebar's minimum width.
                 Text(timerInterval: Date.now...max(Date.now, pending.until), countsDown: true)
                     .monospacedDigit()
-                    .frame(width: 34, alignment: .trailing)
+                    // Sized to its text, so it isn't cut off at larger text sizes.
+                    .fixedSize()
             }
             HStack(spacing: 8) {
                 Text(pending.draft.subject.isEmpty ? "No Subject" : pending.draft.subject)
