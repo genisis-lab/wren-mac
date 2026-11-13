@@ -41,6 +41,7 @@ public struct MailCache: Sendable {
         func invalidate(_ work: () -> Void) {
             lock.lock()
             defer { lock.unlock() }
+            guard active else { return }
             active = false
             work()
         }

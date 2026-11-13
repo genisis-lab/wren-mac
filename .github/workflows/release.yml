@@ -55,7 +55,7 @@ jobs:
           npm test
           npm run build
           git diff --exit-code -- ../Sources/Wren/Resources/pgp.js
-      - name: Test app credential storage
+      - name: Test app security
         run: scripts/test-app-security.sh
       - name: Generate project and build universal app
         run: |

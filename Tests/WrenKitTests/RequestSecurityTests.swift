@@ -105,6 +105,8 @@ final class RequestSecurityTests: XCTestCase {
         XCTAssertTrue(FileManager.default.fileExists(atPath: folder.path))
         XCTAssertTrue(freshSignIn.thread("fresh") != nil)
         XCTAssertTrue(lateRequest.thread("fresh") == nil)
+        lateRequest.delete()
+        XCTAssertTrue(freshSignIn.thread("fresh") != nil)
     }
 
     func testMalformedAdminCountsDoNotTrap() throws {
