@@ -19,6 +19,8 @@ jobs:
         run: |
           swift build --build-tests 2>&1 | tee engine.log
           swift test --skip-build
+      - name: Test app credential storage
+        run: scripts/test-app-security.sh
       - name: Make the Xcode project from project.yml
         run: |
           HOMEBREW_NO_AUTO_UPDATE=1 brew install xcodegen

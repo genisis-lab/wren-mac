@@ -10,11 +10,15 @@ enum Keychain {
     }
 
     static func save(_ secret: String, username: String, server: URL, kind: String = "") throws {
-        SecItemDelete(query(username, server, kind) as CFDictionary)
-        var item = query(username, server, kind)
-        item[kSecValueData as String] = Data(secret.utf8)
-        item[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlock
-        let status = SecItemAdd(item as CFDictionary, nil)
+        let match = query(username, server, kind)
+        let attributes: [String: Any] = [kSecValueData as String: Data(secret.utf8),
+                                        kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlock]
+        // Keep both the old value and its access controls if updating fails (for example, access is denied).
+        var status = SecItemUpdate(match as CFDictionary, attributes as CFDictionary)
+        if status == errSecItemNotFound {
+            let item = match.merging(attributes, uniquingKeysWith: { _, new in new })
+            status = SecItemAdd(item as CFDictionary, nil)
+        }
         guard status == errSecSuccess else {
             let what = kind.isEmpty ? "the app password" : "your \(kind) key"
             throw NSError(domain: NSOSStatusErrorDomain, code: Int(status), userInfo: [NSLocalizedDescriptionKey: "Couldn’t save \(what) in your keychain."])

@@ -66,6 +66,13 @@ public actor AdminClient {
     public nonisolated let client: JMAPClient
     public private(set) var unlock: AdminUnlock?
     private var lastUse = Date.distantPast
+    private var generation = UUID()
+    private var unlocking = false
+
+    private func requireCurrent(_ expected: UUID) throws {
+        try Task.checkCancellation()
+        guard generation == expected else { throw AdminError.locked }
+    }
 
     public init(client: JMAPClient) {
         self.client = client
@@ -87,6 +94,7 @@ public actor AdminClient {
 
     /// Step one: the account password (never the app password). `device` names this Mac in the approval request.
     public func start(password: String, device: String) async throws -> AdminChallenge {
+        unlocking = true
         let r = try await post("/jmap/admin/unlock", ["password": .string(password), "device": .string(device)])
         guard let secret = r["challenge"]?.string, let steps = r["steps"] else { throw JMAPError.badResponse }
         var available: [AdminStep] = []
@@ -116,7 +124,10 @@ public actor AdminClient {
     public func verify(_ challenge: AdminChallenge, step: AdminStep, code: String? = nil) async throws -> Bool {
         var body: [String: JSON] = ["challenge": .string(challenge.secret), "step": .string(step.rawValue)]
         if let code { body["code"] = .string(code) }
+        let expected = generation
+        unlocking = true
         let (status, data) = try await client.request("POST", path: "/jmap/admin/unlock/verify", body: .object(body))
+        try requireCurrent(expected)
         let r = try Self.check(status, data)
         if status == 202 { return false }
         guard let token = r["token"]?.string else { throw JMAPError.badResponse }
@@ -125,14 +136,17 @@ public actor AdminClient {
             expiresAt: wrenDate(r["expiresAt"]?.number) ?? .now.addingTimeInterval(3600),
             idle: r["idleSeconds"]?.number ?? 900
         )
+        unlocking = false
         lastUse = .now
         return true
     }
 
     /// Lock: forget the token here and end it on the server.
     public func lock() async {
-        let had = unlock != nil
+        let had = unlock != nil || unlocking
+        generation = UUID()
         unlock = nil
+        unlocking = false
         if had { _ = try? await client.request("POST", path: "/jmap/admin/lock", body: .object([:])) }
     }
 
@@ -152,17 +166,28 @@ public actor AdminClient {
 
     /// Download an export or a backup to a temporary file: answers it and the name the server suggests.
     public func download(_ path: String) async throws -> (file: URL, filename: String?) {
+        let expected = generation
         let token = try await token()
+        try requireCurrent(expected)
         let (status, file, filename) = try await client.transfer("GET", path: "/api/admin" + path, headers: ["X-Wren-Admin": token])
-        try finish(status, file)
-        return (file, filename)
+        do {
+            try requireCurrent(expected)
+            try finish(status, file)
+            return (file, filename)
+        } catch {
+            try? FileManager.default.removeItem(at: file)
+            throw error
+        }
     }
 
     /// Send a file as the request body (an export to restore). Answers the server's reply.
     public func upload(_ path: String, file: URL, contentType: String) async throws -> JSON {
+        let expected = generation
         let token = try await token()
+        try requireCurrent(expected)
         let (status, saved, _) = try await client.transfer("POST", path: "/api/admin" + path, upload: file, contentType: contentType, headers: ["X-Wren-Admin": token])
         defer { try? FileManager.default.removeItem(at: saved) }
+        try requireCurrent(expected)
         try finish(status, saved)
         return (try? JSONDecoder().decode(JSON.self, from: Data(contentsOf: saved))) ?? .null
     }
@@ -186,8 +211,11 @@ public actor AdminClient {
     }
 
     private func admin(_ method: String, _ path: String, _ body: JSON?) async throws -> Data {
+        let expected = generation
         let token = try await token()
+        try requireCurrent(expected)
         let (status, data) = try await client.request(method, path: "/api/admin" + path, body: body, headers: ["X-Wren-Admin": token])
+        try requireCurrent(expected)
         try checked(status, data)
         lastUse = .now
         return data
@@ -204,7 +232,9 @@ public actor AdminClient {
     }
 
     private func post(_ path: String, _ body: [String: JSON]) async throws -> JSON {
+        let expected = generation
         let (status, data) = try await client.request("POST", path: path, body: .object(body))
+        try requireCurrent(expected)
         return try Self.check(status, data)
     }
 
@@ -232,7 +262,7 @@ extension JSON {
 
 /// A count that may be missing (SQLite's SUM of nothing is null).
 private func count(_ c: KeyedDecodingContainer<AnyKey>, _ key: String) -> Int {
-    (try? c.decodeIfPresent(Double.self, forKey: AnyKey(key))).flatMap { $0 }.map { Int($0) } ?? 0
+    (try? c.decodeIfPresent(Double.self, forKey: AnyKey(key))).flatMap { $0 }.flatMap(Int.init(exactly:)) ?? 0
 }
 
 struct AnyKey: CodingKey {

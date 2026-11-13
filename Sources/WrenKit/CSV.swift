@@ -115,7 +115,7 @@ public enum AdminImport {
         let days = ISO8601DateFormatter()
         days.formatOptions = [.withFullDate]
         let day = { (ms: Double?) in wrenDate(ms).map { days.string(from: $0) } ?? "" }
-        let mb = { (b: Double?) in b.map { String(Int(($0 / 1_048_576).rounded())) } ?? "" }
+        let mb = { (b: Double?) in b.flatMap { Int(exactly: ($0 / 1_048_576).rounded()) }.map(String.init) ?? "" }
         return CSV.make(
             [["email", "name", "role", "status", "created", "last_sign_in", "used_mb", "quota_mb", "send_limit_per_day", "aliases", "messages", "two_step", "recovery_email"]]
                 + users.map { u in

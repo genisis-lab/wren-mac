@@ -11,6 +11,7 @@ public enum JMAPError: Error, LocalizedError, Equatable {
     /// A record a /set call refused (notCreated, notUpdated, notDestroyed).
     case notSaved(String, String?)
     case badResponse
+    case unsafeEndpoint
 
     public var errorDescription: String? {
         switch self {
@@ -21,6 +22,7 @@ public enum JMAPError: Error, LocalizedError, Equatable {
         case .method(let type, let detail): detail ?? "The server refused the request (\(type))."
         case .notSaved(let type, let detail): detail ?? "The change couldn’t be saved (\(type))."
         case .badResponse: "The server sent a reply Wren doesn’t understand."
+        case .unsafeEndpoint: "Wren refused to send credentials outside your signed-in server. Check the server’s address and configuration."
         }
     }
 }
@@ -89,6 +91,8 @@ public actor JMAPClient {
     public nonisolated let username: String
     private let authorization: String
     private let http: URLSession
+    private let origin: RequestOrigin
+    private let redirects: ServerRedirects
     public private(set) var session: Session?
 
     public init(server: URL, username: String, password: String, http: URLSession = URLSession(configuration: .ephemeral)) {
@@ -96,6 +100,8 @@ public actor JMAPClient {
         self.username = username
         self.authorization = "Basic " + Data("\(username):\(password)".utf8).base64EncodedString()
         self.http = http
+        self.origin = RequestOrigin(server: server)
+        self.redirects = ServerRedirects(server: server)
     }
 
     /// Sign in: fetch the session, which lists the accounts and where to send requests.
@@ -113,9 +119,10 @@ public actor JMAPClient {
     }
 
     private func send(_ request: URLRequest) async throws -> Data {
+        try origin.validate(request.url)
         var request = request
         request.setValue(authorization, forHTTPHeaderField: "Authorization")
-        let (data, response) = try await http.data(for: request)
+        let (data, response) = try await http.data(for: request, delegate: redirects)
         try check(response, data)
         return data
     }
@@ -129,9 +136,10 @@ public actor JMAPClient {
     }
 
     /// A plain HTTPS request to the server with this sign-in's app password (the admin unlock and Wren's admin API,
-    /// which aren't JMAP). Answers the status and body whatever the status; throws only when the server can't be reached.
+    /// which aren't JMAP). Answers the status and body whatever the status; throws for unsafe destinations or when the server can’t be reached.
     public func request(_ method: String, path: String, body: JSON? = nil, headers: [String: String] = [:]) async throws -> (status: Int, data: Data) {
-        guard let url = URL(string: path, relativeTo: server) else { throw JMAPError.badResponse }
+        guard let url = URL(string: path, relativeTo: server)?.absoluteURL else { throw JMAPError.badResponse }
+        try origin.validate(url)
         var request = URLRequest(url: url)
         request.httpMethod = method
         request.cachePolicy = .reloadIgnoringLocalCacheData
@@ -143,7 +151,7 @@ public actor JMAPClient {
             request.setValue("application/json", forHTTPHeaderField: "Content-Type")
             request.httpBody = try JSONEncoder().encode(body)
         }
-        let (data, response) = try await http.data(for: request)
+        let (data, response) = try await http.data(for: request, delegate: redirects)
         guard let response = response as? HTTPURLResponse else { throw JMAPError.badResponse }
         return (response.statusCode, data)
     }
@@ -154,7 +162,8 @@ public actor JMAPClient {
     public func transfer(
         _ method: String, path: String, upload: URL? = nil, contentType: String? = nil, headers: [String: String] = [:]
     ) async throws -> (status: Int, file: URL, filename: String?) {
-        guard let url = URL(string: path, relativeTo: server) else { throw JMAPError.badResponse }
+        guard let url = URL(string: path, relativeTo: server)?.absoluteURL else { throw JMAPError.badResponse }
+        try origin.validate(url)
         var request = URLRequest(url: url)
         request.httpMethod = method
         request.cachePolicy = .reloadIgnoringLocalCacheData
@@ -167,12 +176,12 @@ public actor JMAPClient {
         let saved: URL, response: URLResponse
         if let upload {
             // Sent from the file; the answer is small JSON, saved like a download so both come back the same way.
-            let (data, r) = try await http.upload(for: request, fromFile: upload)
+            let (data, r) = try await http.upload(for: request, fromFile: upload, delegate: redirects)
             saved = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
             try data.write(to: saved)
             response = r
         } else {
-            (saved, response) = try await http.download(for: request)
+            (saved, response) = try await http.download(for: request, delegate: redirects)
         }
         guard let response = response as? HTTPURLResponse else { throw JMAPError.badResponse }
         return (response.statusCode, saved, Self.filename(response.value(forHTTPHeaderField: "Content-Disposition")))
@@ -229,12 +238,13 @@ public actor JMAPClient {
     public func listen(onChange: @escaping @Sendable (_ changed: [String: String]) async -> Void) async throws {
         let session = try await currentSession()
         guard let template = session.eventSourceUrl, let url = URL(string: expand(template, ["types": "*", "closeafter": "no", "ping": "60"])) else { return }
+        try origin.validate(url)
         var request = URLRequest(url: url)
         request.setValue(authorization, forHTTPHeaderField: "Authorization")
         request.setValue("text/event-stream", forHTTPHeaderField: "Accept")
         // Pings come every 60 seconds; longer than that without a byte means the connection is gone.
         request.timeoutInterval = 150
-        let (bytes, response) = try await http.bytes(for: request)
+        let (bytes, response) = try await http.bytes(for: request, delegate: redirects)
         try check(response, Data())
         var event = ""
         for try await line in bytes.lines {

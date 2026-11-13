@@ -43,6 +43,8 @@ jobs:
           echo "RELEASE_TAG=$tag" >> "$GITHUB_ENV"
       - name: Test the mail engine
         run: swift test
+      - name: Test app credential storage
+        run: scripts/test-app-security.sh
       - name: Generate project and build universal app
         run: |
           HOMEBREW_NO_AUTO_UPDATE=1 brew install xcodegen

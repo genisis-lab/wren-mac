@@ -466,7 +466,7 @@ private struct ProviderField: View {
         Binding(get: {
             switch value {
             case .string(let s): s
-            case .number(let n): n.rounded() == n ? String(Int(n)) : String(n)
+            case .number(let n): Int(exactly: n).map(String.init) ?? String(n)
             case .bool(let b): b ? "true" : "false"
             default: ""
             }
