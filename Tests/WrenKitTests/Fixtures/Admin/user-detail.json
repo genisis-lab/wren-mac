@@ -1,0 +1,102 @@
+{
+  "user": {
+    "id": 2,
+    "email": "sam@wren.test",
+    "name": "Sam Lee",
+    "role": "user",
+    "status": "active",
+    "createdAt": 1794544834533,
+    "lastLoginAt": null,
+    "passwordChangedAt": 1794544834533,
+    "mustChangePassword": false,
+    "totpEnabled": false,
+    "passkeys": 0,
+    "recoveryEmail": null,
+    "recoveryVerified": false,
+    "usedBytes": 626,
+    "quotaBytes": 2147483648,
+    "customQuota": true,
+    "sendLimitPerDay": 500,
+    "customSendLimit": false,
+    "sentToday": 0,
+    "lockedUntil": null,
+    "legalHold": {
+      "since": 1794544834549,
+      "note": "Case 12"
+    },
+    "sendPausedAt": null,
+    "sendPausedReason": null
+  },
+  "mailHandling": {
+    "vacation": {
+      "enabled": true,
+      "subject": "Away",
+      "message": "Back Monday",
+      "startAt": null,
+      "endAt": 1794631234535,
+      "contactsOnly": false
+    },
+    "forwarding": {
+      "enabled": false,
+      "to": "",
+      "keep": "inbox"
+    }
+  },
+  "mailApps": {
+    "enabled": false,
+    "allowed": true,
+    "passwords": []
+  },
+  "exports": [
+    {
+      "id": 1,
+      "kind": "export",
+      "status": "queued",
+      "progress": {},
+      "error": null,
+      "createdAt": 1794544834547,
+      "updatedAt": 1794544834547
+    }
+  ],
+  "storage": {
+    "folders": [
+      {
+        "folder": "inbox",
+        "c": 1,
+        "bytes": 626
+      }
+    ],
+    "attachments": {
+      "c": 0,
+      "bytes": 0
+    }
+  },
+  "addresses": [
+    {
+      "id": 4,
+      "address": "team@wren.test",
+      "kind": "group",
+      "enabled": 1,
+      "can_send": 1,
+      "created_by": null
+    },
+    {
+      "id": 2,
+      "address": "sam@wren.test",
+      "kind": "mailbox",
+      "enabled": 1,
+      "can_send": 1,
+      "created_by": null
+    }
+  ],
+  "shared": [
+    {
+      "id": 3,
+      "email": "support@wren.test",
+      "name": "Support",
+      "canSend": false
+    }
+  ],
+  "sessions": [],
+  "signIns": []
+}

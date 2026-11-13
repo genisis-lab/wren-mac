@@ -38,14 +38,14 @@ public struct AdminUnlock: Sendable, Equatable {
 public enum AdminError: Error, LocalizedError, Equatable {
     /// The unlock ended (time, Lock, or the server ended it): unlock again.
     case locked
-    /// Only the web admin panel does this.
+    /// The server is older than this app: it answers only part of the admin panel to apps.
     case webOnly
     case server(Int, String?, code: String?)
 
     public var errorDescription: String? {
         switch self {
         case .locked: "The admin panel locked. Unlock it again to carry on."
-        case .webOnly: "Use the admin panel on the web for this."
+        case .webOnly: "Your Wren server needs an update before the Mac can do this. Until then, use the admin panel on the web."
         case .server(let status, let message, _): message ?? "The server answered with an error (\(status))."
         }
     }
@@ -150,20 +150,57 @@ public actor AdminClient {
         return data.isEmpty ? .null : try JSONDecoder().decode(JSON.self, from: data)
     }
 
-    private func admin(_ method: String, _ path: String, _ body: JSON?) async throws -> Data {
+    /// Download an export or a backup to a temporary file: answers it and the name the server suggests.
+    public func download(_ path: String) async throws -> (file: URL, filename: String?) {
+        let token = try await token()
+        let (status, file, filename) = try await client.transfer("GET", path: "/api/admin" + path, headers: ["X-Wren-Admin": token])
+        try finish(status, file)
+        return (file, filename)
+    }
+
+    /// Send a file as the request body (an export to restore). Answers the server's reply.
+    public func upload(_ path: String, file: URL, contentType: String) async throws -> JSON {
+        let token = try await token()
+        let (status, saved, _) = try await client.transfer("POST", path: "/api/admin" + path, upload: file, contentType: contentType, headers: ["X-Wren-Admin": token])
+        defer { try? FileManager.default.removeItem(at: saved) }
+        try finish(status, saved)
+        return (try? JSONDecoder().decode(JSON.self, from: Data(contentsOf: saved))) ?? .null
+    }
+
+    private func token() async throws -> String {
         guard let unlock, isUnlocked else {
             await lock()
             throw AdminError.locked
         }
-        let (status, data) = try await client.request(method, path: "/api/admin" + path, body: body, headers: ["X-Wren-Admin": unlock.token])
+        return unlock.token
+    }
+
+    /// A transfer's answer: an error's body is small JSON, read from the file and then removed.
+    private func finish(_ status: Int, _ file: URL) throws {
+        if !(200..<300).contains(status) {
+            let data = (try? Data(contentsOf: file)) ?? Data()
+            try? FileManager.default.removeItem(at: file)
+            try checked(status, data)
+        }
+        lastUse = .now
+    }
+
+    private func admin(_ method: String, _ path: String, _ body: JSON?) async throws -> Data {
+        let token = try await token()
+        let (status, data) = try await client.request(method, path: "/api/admin" + path, body: body, headers: ["X-Wren-Admin": token])
+        try checked(status, data)
+        lastUse = .now
+        return data
+    }
+
+    /// The server's error, if it answered one; an ended unlock is forgotten here too.
+    private func checked(_ status: Int, _ data: Data) throws {
         do {
             _ = try Self.check(status, data)
         } catch AdminError.locked {
             self.unlock = nil
             throw AdminError.locked
         }
-        lastUse = .now
-        return data
     }
 
     private func post(_ path: String, _ body: [String: JSON]) async throws -> JSON {
@@ -235,6 +272,9 @@ public struct AdminOverview: Decodable, Sendable {
     public var flagged: [Flagged] = []
     public var series: [Day] = []
     public var warnings: [Warning] = []
+    public var databaseBytes: Double = 0, fileBytes: Double = 0
+    /// Since the server started, in milliseconds.
+    public var uptime: Double?
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: AnyKey.self)
@@ -255,6 +295,11 @@ public struct AdminOverview: Decodable, Sendable {
             failedSignIns24h = count(s, "failed24h"); newLocationSignIns7d = count(s, "newLocation7d")
             flagged = (try? s.decode([Flagged].self, forKey: AnyKey("users"))) ?? []
         }
+        if let st = try? c.nestedContainer(keyedBy: AnyKey.self, forKey: AnyKey("storage")) {
+            databaseBytes = (try? st.decode(Double.self, forKey: AnyKey("database"))) ?? 0
+            fileBytes = (try? st.decode(Double.self, forKey: AnyKey("blobs"))) ?? 0
+        }
+        uptime = try? c.decode(Double.self, forKey: AnyKey("uptime"))
         series = (try? c.decode([Day].self, forKey: AnyKey("series"))) ?? []
         warnings = (try? c.decode([Warning].self, forKey: AnyKey("warnings"))) ?? []
     }
@@ -269,6 +314,9 @@ public struct AdminUser: Decodable, Sendable, Hashable, Identifiable {
     public var status: String
     public var usedBytes: Double?
     public var quotaBytes: Double?
+    public var customQuota: Bool?
+    public var sendLimitPerDay: Int?
+    public var customSendLimit: Bool?
     public var totpEnabled: Bool?
     public var lastLoginAt: Double?
     public var createdAt: Double?
@@ -278,6 +326,8 @@ public struct AdminUser: Decodable, Sendable, Hashable, Identifiable {
     public var legalHold: Bool?
     /// Locked out for now by too many wrong passwords.
     public var locked: Bool?
+    public var aliases: Int?
+    public var messages: Int?
 
     public var isSuspended: Bool { status == "suspended" }
 }
@@ -312,8 +362,22 @@ public struct AdminUserDetail: Decodable, Sendable {
     }
 
     public struct MailApps: Decodable, Sendable {
+        public struct Password: Decodable, Sendable, Identifiable {
+            public var id: Int
+            public var name: String
+            public var lastUsedAt: Double?
+            public var createdAt: Double?
+        }
         public var enabled: Bool
         public var allowed: Bool
+        public var passwords: [Password]?
+    }
+
+    public struct Shared: Decodable, Sendable, Identifiable {
+        public var id: Int
+        public var email: String
+        public var name: String?
+        public var canSend: Bool
     }
 
     public struct Session: Decodable, Sendable, Identifiable {
@@ -347,6 +411,10 @@ public struct AdminUserDetail: Decodable, Sendable {
     public var sessions: [Session]
     public var signIns: [SignIn]
     public var addresses: [Address]
+    /// Not for helpdesk staff: they see account support details only.
+    public var mailHandling: AdminMailHandling?
+    public var exports: [AdminExportJob]?
+    public var shared: [Shared]?
 }
 
 public struct AdminInvite: Decodable, Sendable, Identifiable {

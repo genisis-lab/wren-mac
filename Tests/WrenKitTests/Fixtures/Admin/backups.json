@@ -1,0 +1,22 @@
+{
+  "settings": {
+    "enabled": true,
+    "keep": 7,
+    "hour": 3
+  },
+  "nextAt": 1794544834798,
+  "backups": [
+    {
+      "id": 1,
+      "kind": "manual",
+      "status": "running",
+      "rows": 0,
+      "bytes": 0,
+      "parts": 0,
+      "error": null,
+      "createdAt": 1794544834737,
+      "finishedAt": null,
+      "createdBy": "admin@wren.test"
+    }
+  ]
+}

@@ -1,0 +1,24 @@
+{
+  "catchAllUserId": 1,
+  "hits": [
+    {
+      "address": "postmaster@wren.test",
+      "count": 1,
+      "firstAt": 1794544834723,
+      "lastAt": 1794544834723,
+      "lastFrom": "noreply-dmarc-support@google.com",
+      "lastSubject": "Report Domain: wren.test",
+      "blocked": false
+    },
+    {
+      "address": "ghost@wren.test",
+      "count": 1,
+      "firstAt": 1794544834717,
+      "lastAt": 1794544834717,
+      "lastFrom": "carol@example.org",
+      "lastSubject": "Hello?",
+      "blocked": false
+    }
+  ],
+  "blocked": []
+}

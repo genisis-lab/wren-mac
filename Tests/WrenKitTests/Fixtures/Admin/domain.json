@@ -1,0 +1,63 @@
+{
+  "domain": {
+    "id": 1,
+    "name": "wren.test",
+    "enabled": true,
+    "verified": true,
+    "verifiedAt": 1794544834707,
+    "verifyToken": "test-verify-token",
+    "providerId": null,
+    "providerName": null,
+    "fallbackProviderId": null,
+    "catchAllUserId": 1,
+    "catchAllEmail": "admin@wren.test",
+    "dkimSelector": null,
+    "footerText": "",
+    "mailboxes": 3,
+    "aliases": 2,
+    "dnsCheckedAt": null,
+    "dns": null,
+    "createdAt": 1794544834344
+  },
+  "records": [
+    {
+      "type": "TXT",
+      "host": "_wren.wren.test",
+      "value": "wren-verify=test-verify-token",
+      "purpose": "Proves you own the domain. Not needed if the domain receives mail through Cloudflare Email Routing: it’s verified automatically when the first message arrives.",
+      "optional": true
+    },
+    {
+      "type": "MX",
+      "host": "wren.test",
+      "value": "(the MX record Resend shows)",
+      "priority": 10,
+      "purpose": "Mail arrives through Resend: turn on receiving for wren.test there, add the MX record it shows, and point its inbound webhook at the URL on the Providers page. (Receiving through Cloudflare Email Routing instead? Use route1/route2/route3.mx.cloudflare.net.)"
+    },
+    {
+      "type": "MX",
+      "host": "send.wren.test",
+      "value": "(feedback-smtp.<region>.amazonses.com, as Resend shows)",
+      "priority": 10,
+      "purpose": "Bounce handling for Resend. The region in the host name comes from your Resend domain page."
+    },
+    {
+      "type": "TXT",
+      "host": "send.wren.test",
+      "value": "v=spf1 include:amazonses.com ~all",
+      "purpose": "SPF for Resend’s bounce subdomain. Resend sends from send.wren.test, so the domain’s own SPF record can stay as it is."
+    },
+    {
+      "type": "TXT",
+      "host": "_dmarc.wren.test",
+      "value": "v=DMARC1; p=quarantine; rua=mailto:postmaster@wren.test",
+      "purpose": "DMARC policy — start with p=none if you are unsure."
+    },
+    {
+      "type": "TXT",
+      "host": "resend._domainkey.wren.test",
+      "value": "(copy the DKIM value from Resend)",
+      "purpose": "DKIM signature key — the exact value comes from your sending provider."
+    }
+  ]
+}

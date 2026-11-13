@@ -1,0 +1,218 @@
+{
+  "items": [
+    {
+      "id": 19,
+      "user_id": 1,
+      "action": "admin.backup_started",
+      "target": "backup 1",
+      "details": null,
+      "ip": "",
+      "created_at": 1794544834737,
+      "user_email": "admin@wren.test"
+    },
+    {
+      "id": 18,
+      "user_id": 1,
+      "action": "admin.invite_created",
+      "target": "new@wren.test",
+      "details": {
+        "role": "user",
+        "sentTo": null
+      },
+      "ip": "",
+      "created_at": 1794544834697,
+      "user_email": "admin@wren.test"
+    },
+    {
+      "id": 17,
+      "user_id": 1,
+      "action": "admin.blocklist_added",
+      "target": "spam.example",
+      "details": null,
+      "ip": "",
+      "created_at": 1794544834696,
+      "user_email": "admin@wren.test"
+    },
+    {
+      "id": 16,
+      "user_id": 1,
+      "action": "admin.suppression_added",
+      "target": "bounced@example.org",
+      "details": null,
+      "ip": "",
+      "created_at": 1794544834695,
+      "user_email": "admin@wren.test"
+    },
+    {
+      "id": 15,
+      "user_id": 1,
+      "action": "admin.shared_mailbox_created",
+      "target": "support@wren.test",
+      "details": {
+        "members": 1
+      },
+      "ip": "",
+      "created_at": 1794544834693,
+      "user_email": "admin@wren.test"
+    },
+    {
+      "id": 14,
+      "user_id": 1,
+      "action": "admin.group_created",
+      "target": "team@wren.test",
+      "details": null,
+      "ip": "",
+      "created_at": 1794544834575,
+      "user_email": "admin@wren.test"
+    },
+    {
+      "id": 13,
+      "user_id": 1,
+      "action": "admin.alias_created",
+      "target": "hello@wren.test",
+      "details": null,
+      "ip": "",
+      "created_at": 1794544834574,
+      "user_email": "admin@wren.test"
+    },
+    {
+      "id": 12,
+      "user_id": 1,
+      "action": "admin.domain_updated",
+      "target": "wren.test",
+      "details": {
+        "catchAllUserId": 1
+      },
+      "ip": "",
+      "created_at": 1794544834570,
+      "user_email": "admin@wren.test"
+    },
+    {
+      "id": 11,
+      "user_id": 1,
+      "action": "admin.domain_updated",
+      "target": "example.test",
+      "details": {
+        "catchAllUserId": null,
+        "dkimSelector": "resend",
+        "footerText": "Sent from Example"
+      },
+      "ip": "",
+      "created_at": 1794544834566,
+      "user_email": "admin@wren.test"
+    },
+    {
+      "id": 10,
+      "user_id": 1,
+      "action": "admin.domain_added",
+      "target": "example.test",
+      "details": null,
+      "ip": "",
+      "created_at": 1794544834562,
+      "user_email": "admin@wren.test"
+    },
+    {
+      "id": 9,
+      "user_id": 1,
+      "action": "admin.provider_created",
+      "target": "Log",
+      "details": {
+        "type": "log"
+      },
+      "ip": "",
+      "created_at": 1794544834559,
+      "user_email": "admin@wren.test"
+    },
+    {
+      "id": 8,
+      "user_id": 1,
+      "action": "admin.provider_created",
+      "target": "Resend",
+      "details": {
+        "type": "resend"
+      },
+      "ip": "",
+      "created_at": 1794544834558,
+      "user_email": "admin@wren.test"
+    },
+    {
+      "id": 7,
+      "user_id": 1,
+      "action": "admin.user_legal_hold_placed",
+      "target": "sam@wren.test",
+      "details": {
+        "note": "Case 12"
+      },
+      "ip": "",
+      "created_at": 1794544834549,
+      "user_email": "admin@wren.test"
+    },
+    {
+      "id": 6,
+      "user_id": 1,
+      "action": "admin.user_export_started",
+      "target": "sam@wren.test",
+      "details": null,
+      "ip": "",
+      "created_at": 1794544834547,
+      "user_email": "admin@wren.test"
+    },
+    {
+      "id": 5,
+      "user_id": 1,
+      "action": "admin.user_forwarding",
+      "target": "sam@wren.test",
+      "details": {
+        "to": null
+      },
+      "ip": "",
+      "created_at": 1794544834544,
+      "user_email": "admin@wren.test"
+    },
+    {
+      "id": 4,
+      "user_id": 1,
+      "action": "admin.user_vacation",
+      "target": "sam@wren.test",
+      "details": {
+        "enabled": true
+      },
+      "ip": "",
+      "created_at": 1794544834544,
+      "user_email": "admin@wren.test"
+    },
+    {
+      "id": 3,
+      "user_id": 1,
+      "action": "admin.user_created",
+      "target": "sam@wren.test",
+      "details": {
+        "role": "user",
+        "setupEmail": null
+      },
+      "ip": "",
+      "created_at": 1794544834535,
+      "user_email": "admin@wren.test"
+    },
+    {
+      "id": 2,
+      "user_id": 1,
+      "action": "auth.login",
+      "target": "admin@wren.test",
+      "details": null,
+      "ip": "",
+      "created_at": 1794544834476,
+      "user_email": "admin@wren.test"
+    },
+    {
+      "id": 1,
+      "user_id": 1,
+      "action": "setup.complete",
+      "target": "wren.test",
+      "details": null,
+      "ip": "",
+      "created_at": 1794544834412,
+      "user_email": "admin@wren.test"
+    }
+  ]
+}

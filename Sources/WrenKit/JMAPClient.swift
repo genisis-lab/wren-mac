@@ -148,6 +148,44 @@ public actor JMAPClient {
         return (response.statusCode, data)
     }
 
+    /// Like `request`, for files too big to hold in memory: the body is read from `upload` when given, and the
+    /// answer is saved to a temporary file (exports and backups to download, an export to restore). Answers the
+    /// status, that file and the file name the server suggests.
+    public func transfer(
+        _ method: String, path: String, upload: URL? = nil, contentType: String? = nil, headers: [String: String] = [:]
+    ) async throws -> (status: Int, file: URL, filename: String?) {
+        guard let url = URL(string: path, relativeTo: server) else { throw JMAPError.badResponse }
+        var request = URLRequest(url: url)
+        request.httpMethod = method
+        request.cachePolicy = .reloadIgnoringLocalCacheData
+        request.setValue(authorization, forHTTPHeaderField: "Authorization")
+        request.setValue("1", forHTTPHeaderField: "X-Wren")
+        if let contentType { request.setValue(contentType, forHTTPHeaderField: "Content-Type") }
+        for (key, value) in headers { request.setValue(value, forHTTPHeaderField: key) }
+        // A restore can take minutes on a big export.
+        request.timeoutInterval = 600
+        let saved: URL, response: URLResponse
+        if let upload {
+            // Sent from the file; the answer is small JSON, saved like a download so both come back the same way.
+            let (data, r) = try await http.upload(for: request, fromFile: upload)
+            saved = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+            try data.write(to: saved)
+            response = r
+        } else {
+            (saved, response) = try await http.download(for: request)
+        }
+        guard let response = response as? HTTPURLResponse else { throw JMAPError.badResponse }
+        return (response.statusCode, saved, Self.filename(response.value(forHTTPHeaderField: "Content-Disposition")))
+    }
+
+    /// The file name in a Content-Disposition header, without any folders.
+    static func filename(_ disposition: String?) -> String? {
+        guard let disposition, let range = disposition.range(of: #"filename="?([^";]+)"?"#, options: .regularExpression) else { return nil }
+        let value = disposition[range].replacingOccurrences(of: "filename=", with: "").trimmingCharacters(in: CharacterSet(charactersIn: "\" "))
+        let name = (value as NSString).lastPathComponent
+        return name.isEmpty || name == "." || name == ".." ? nil : name
+    }
+
     /// Make method calls in one request. Call `i` has the id "i", for result references.
     public func call(_ calls: [(String, JSON)]) async throws -> Responses {
         let session = try await currentSession()

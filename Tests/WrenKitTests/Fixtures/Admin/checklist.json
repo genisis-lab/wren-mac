@@ -1,0 +1,61 @@
+{
+  "items": [
+    {
+      "id": "domain",
+      "title": "Add your domain",
+      "status": "done",
+      "detail": "wren.test · verified"
+    },
+    {
+      "id": "provider",
+      "title": "Choose how mail is sent",
+      "status": "done",
+      "detail": "Sending with Resend."
+    },
+    {
+      "id": "auth",
+      "title": "Authenticate your domain",
+      "status": "todo",
+      "detail": "Run a DNS check to see SPF and DKIM status.",
+      "action": {
+        "label": "Check DNS",
+        "href": "/admin/domains/1"
+      }
+    },
+    {
+      "id": "receive",
+      "title": "Receive mail",
+      "status": "done",
+      "detail": "Last message arrived just now."
+    },
+    {
+      "id": "roundtrip",
+      "title": "Send a test to yourself",
+      "status": "todo",
+      "detail": "Sends a message out through your provider to your own address and waits for it to arrive.",
+      "action": {
+        "label": "Send test",
+        "api": "/api/admin/checklist/roundtrip"
+      }
+    },
+    {
+      "id": "team",
+      "title": "Add your team",
+      "status": "done",
+      "detail": "2 people have mailboxes.",
+      "optional": true
+    },
+    {
+      "id": "security",
+      "title": "Secure your admin account",
+      "status": "todo",
+      "detail": "Turn on two-step verification and add a recovery email",
+      "action": {
+        "label": "Open security settings",
+        "href": "/settings/security"
+      },
+      "optional": true
+    }
+  ],
+  "complete": false
+}

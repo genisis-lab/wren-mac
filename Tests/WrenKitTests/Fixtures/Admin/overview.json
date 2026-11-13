@@ -1,0 +1,157 @@
+{
+  "version": "0.5.1",
+  "uptime": 432,
+  "users": {
+    "total": 2,
+    "active": 2,
+    "suspended": 0,
+    "admins": 1
+  },
+  "domains": {
+    "total": 2,
+    "verified": 1,
+    "enabled": 2
+  },
+  "series": [
+    {
+      "date": 1793404800000,
+      "received": 0,
+      "sent": 0,
+      "failed": 0
+    },
+    {
+      "date": 1793491200000,
+      "received": 0,
+      "sent": 0,
+      "failed": 0
+    },
+    {
+      "date": 1793577600000,
+      "received": 0,
+      "sent": 0,
+      "failed": 0
+    },
+    {
+      "date": 1793664000000,
+      "received": 0,
+      "sent": 0,
+      "failed": 0
+    },
+    {
+      "date": 1793750400000,
+      "received": 0,
+      "sent": 0,
+      "failed": 0
+    },
+    {
+      "date": 1793836800000,
+      "received": 0,
+      "sent": 0,
+      "failed": 0
+    },
+    {
+      "date": 1793923200000,
+      "received": 0,
+      "sent": 0,
+      "failed": 0
+    },
+    {
+      "date": 1794009600000,
+      "received": 0,
+      "sent": 0,
+      "failed": 0
+    },
+    {
+      "date": 1794096000000,
+      "received": 0,
+      "sent": 0,
+      "failed": 0
+    },
+    {
+      "date": 1794182400000,
+      "received": 0,
+      "sent": 0,
+      "failed": 0
+    },
+    {
+      "date": 1794268800000,
+      "received": 0,
+      "sent": 0,
+      "failed": 0
+    },
+    {
+      "date": 1794355200000,
+      "received": 0,
+      "sent": 0,
+      "failed": 0
+    },
+    {
+      "date": 1794441600000,
+      "received": 0,
+      "sent": 0,
+      "failed": 0
+    },
+    {
+      "date": 1794528000000,
+      "received": 3,
+      "sent": 0,
+      "failed": 1
+    }
+  ],
+  "queue": {
+    "queued": 0,
+    "sending": 0,
+    "failed24h": 1
+  },
+  "last24": {
+    "received": 3,
+    "sent": 0,
+    "rejected": 0,
+    "spam": 0
+  },
+  "providers": [
+    {
+      "id": 2,
+      "name": "Log",
+      "type": "log",
+      "enabled": 1,
+      "is_default": 0,
+      "sent_count": 0,
+      "failed_count": 0,
+      "received_count": 0,
+      "last_used_at": null,
+      "last_error": null,
+      "last_error_at": null,
+      "typeName": "Log only (testing)"
+    },
+    {
+      "id": 1,
+      "name": "Resend",
+      "type": "resend",
+      "enabled": 1,
+      "is_default": 1,
+      "sent_count": 0,
+      "failed_count": 0,
+      "received_count": 0,
+      "last_used_at": null,
+      "last_error": null,
+      "last_error_at": null,
+      "typeName": "Resend"
+    }
+  ],
+  "storage": {
+    "database": 0,
+    "blobs": 2018
+  },
+  "signIns": {
+    "failed24h": 0,
+    "newLocation7d": 0,
+    "users": []
+  },
+  "warnings": [
+    {
+      "level": "info",
+      "message": "PUBLIC_URL is localhost — inbound webhook URLs will not be reachable by providers."
+    }
+  ]
+}

@@ -1,0 +1,44 @@
+{
+  "providers": [
+    {
+      "id": 1,
+      "name": "Resend",
+      "type": "resend",
+      "typeName": "Resend",
+      "enabled": true,
+      "isDefault": true,
+      "outbound": true,
+      "inbound": true,
+      "inboundUrl": "http://localhost:8787/api/inbound/test-inbound-token",
+      "sentCount": 0,
+      "failedCount": 0,
+      "receivedCount": 0,
+      "lastUsedAt": null,
+      "lastError": null,
+      "lastErrorAt": null,
+      "domains": [
+        "example.test"
+      ],
+      "createdAt": 1794544834558
+    },
+    {
+      "id": 2,
+      "name": "Log",
+      "type": "log",
+      "typeName": "Log only (testing)",
+      "enabled": true,
+      "isDefault": false,
+      "outbound": true,
+      "inbound": false,
+      "inboundUrl": null,
+      "sentCount": 0,
+      "failedCount": 0,
+      "receivedCount": 0,
+      "lastUsedAt": null,
+      "lastError": null,
+      "lastErrorAt": null,
+      "domains": [],
+      "createdAt": 1794544834559
+    }
+  ]
+}

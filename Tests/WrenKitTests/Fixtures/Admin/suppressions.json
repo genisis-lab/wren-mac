@@ -1,0 +1,10 @@
+{
+  "items": [
+    {
+      "address": "bounced@example.org",
+      "reason": "manual",
+      "detail": "",
+      "createdAt": 1794544834695
+    }
+  ]
+}

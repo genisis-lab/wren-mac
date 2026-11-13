@@ -1,0 +1,33 @@
+{
+  "days": 30,
+  "domains": [
+    {
+      "domain": "wren.test",
+      "policy": "quarantine",
+      "reports": 1,
+      "reporters": 1,
+      "lastReportAt": 1794458434000,
+      "total": 46,
+      "passed": 40,
+      "failed": 6,
+      "passRate": 87,
+      "dkimPassRate": 87,
+      "spfPassRate": 87,
+      "failingSources": [
+        {
+          "ip": "198.51.100.7",
+          "count": 6,
+          "headerFrom": [
+            "wren.test"
+          ],
+          "dispositions": [
+            "quarantine"
+          ],
+          "reporters": [
+            "google.com"
+          ]
+        }
+      ]
+    }
+  ]
+}

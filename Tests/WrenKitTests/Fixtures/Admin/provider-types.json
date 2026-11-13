@@ -1,0 +1,957 @@
+{
+  "types": [
+    {
+      "type": "cloudflare-binding",
+      "name": "Cloudflare Email Service",
+      "description": "Built into Cloudflare Workers. Sends with this Worker’s email binding, so there’s no API key. Email Routing delivers incoming mail.",
+      "website": "https://developers.cloudflare.com/email-service/",
+      "category": "api",
+      "recommended": true,
+      "inboundVia": "Email Routing",
+      "outbound": true,
+      "inbound": false,
+      "rawMime": true,
+      "fields": [
+        {
+          "key": "binding",
+          "label": "Binding name",
+          "type": "text",
+          "default": "EMAIL",
+          "help": "The [[send_email]] binding in wrangler.toml. Leave as EMAIL."
+        }
+      ],
+      "dkimSelectors": [
+        "cf2024-1"
+      ],
+      "eventsSetup": "Bounce messages and spam reports that come back to the sender are read automatically.",
+      "eventsWebhook": false,
+      "outboundSetup": "In the Cloudflare dashboard open Email Service → Email Sending and onboard your domain (Cloudflare adds the SPF and DKIM records). Then send a test email. Incoming mail: Email Routing → catch-all → “Send to a Worker” → this Worker."
+    },
+    {
+      "type": "resend",
+      "name": "Resend",
+      "description": "Developer-first email API. Supports sending and inbound (email.received webhooks).",
+      "website": "https://resend.com",
+      "category": "api",
+      "outbound": true,
+      "inbound": true,
+      "rawMime": false,
+      "fields": [
+        {
+          "key": "apiKey",
+          "label": "API key",
+          "type": "password",
+          "required": true,
+          "placeholder": "re_…"
+        },
+        {
+          "key": "webhookSecret",
+          "label": "Webhook signing secret",
+          "type": "password",
+          "placeholder": "whsec_…",
+          "help": "Optional but recommended: verifies inbound webhooks.",
+          "inbound": true
+        }
+      ],
+      "spfInclude": "amazonses.com",
+      "dkimSelectors": [
+        "resend"
+      ],
+      "inboundSetup": "In Resend, enable receiving on your domain and add the MX record it shows. Then go to Webhooks → Add endpoint, paste {{url}} and select the email.received event. Also select email.delivered, email.bounced, email.complained and email.delivery_delayed to see delivery status in Wren’s logs. Copy the signing secret into this provider. The API key needs permission to read received emails.",
+      "eventsSetup": "In Resend → Webhooks, add (or edit) the endpoint {{url}} and select email.delivered, email.bounced, email.complained and email.delivery_delayed.",
+      "eventsWebhook": true,
+      "outboundSetup": "Verify your domain in the Resend dashboard (Domains), then paste a sending API key."
+    },
+    {
+      "type": "ses",
+      "name": "Amazon SES",
+      "description": "Amazon Simple Email Service (v2 API, raw MIME). Inbound via SES receipt rules → SNS (or S3 + SNS).",
+      "website": "https://aws.amazon.com/ses/",
+      "category": "api",
+      "outbound": true,
+      "inbound": true,
+      "rawMime": true,
+      "fields": [
+        {
+          "key": "region",
+          "label": "Region",
+          "type": "text",
+          "required": true,
+          "default": "us-east-1",
+          "placeholder": "us-east-1"
+        },
+        {
+          "key": "accessKeyId",
+          "label": "Access key ID",
+          "type": "text",
+          "required": true
+        },
+        {
+          "key": "secretAccessKey",
+          "label": "Secret access key",
+          "type": "password",
+          "required": true
+        },
+        {
+          "key": "configurationSet",
+          "label": "Configuration set",
+          "type": "text",
+          "help": "Optional SES configuration set name."
+        },
+        {
+          "key": "topicArn",
+          "label": "Allowed SNS topic ARN",
+          "type": "text",
+          "inbound": true,
+          "help": "Only accept inbound notifications from this topic (recommended)."
+        }
+      ],
+      "spfInclude": "amazonses.com",
+      "inboundSetup": "In SES, add a receipt rule for your domain with an SNS action (encoding: Base64) — or an S3 action plus SNS topic for large mail. Subscribe {{url}} to the topic (HTTPS); Wren confirms the subscription automatically. For S3, the IAM user also needs s3:GetObject on the bucket.",
+      "eventsSetup": "Create a configuration set (or identity notifications) that sends Bounce, Complaint and Delivery events to an SNS topic, and subscribe {{url}} to it over HTTPS.",
+      "eventsWebhook": true,
+      "outboundSetup": "Verify your domain identity in SES (Easy DKIM), request production access, and create an IAM user allowed to call ses:SendEmail / ses:SendRawEmail."
+    },
+    {
+      "type": "postmark",
+      "name": "Postmark",
+      "description": "Fast transactional email with excellent deliverability and inbound processing.",
+      "website": "https://postmarkapp.com",
+      "category": "api",
+      "outbound": true,
+      "inbound": true,
+      "rawMime": false,
+      "fields": [
+        {
+          "key": "serverToken",
+          "label": "Server API token",
+          "type": "password",
+          "required": true
+        },
+        {
+          "key": "messageStream",
+          "label": "Message stream",
+          "type": "text",
+          "default": "outbound",
+          "help": "Usually “outbound”."
+        }
+      ],
+      "spfInclude": "spf.mtasv.net",
+      "inboundSetup": "In your Postmark server, open the Inbound stream → Settings and set the webhook URL to {{url}}. Enable “Include raw email content in JSON payload” for best fidelity. Point your MX to inbound.postmarkapp.com (or forward to the inbound address Postmark gives you).",
+      "eventsSetup": "In Postmark → your server → Webhooks, add {{url}} and tick Delivery, Bounce and Spam Complaint.",
+      "eventsWebhook": true,
+      "outboundSetup": "Add and verify a Sender Signature or Domain (DKIM + Return-Path) in Postmark, then copy the server API token."
+    },
+    {
+      "type": "sendgrid",
+      "name": "SendGrid (Twilio)",
+      "description": "Twilio SendGrid Mail Send v3 API and Inbound Parse webhooks.",
+      "website": "https://sendgrid.com",
+      "category": "api",
+      "outbound": true,
+      "inbound": true,
+      "rawMime": false,
+      "fields": [
+        {
+          "key": "apiKey",
+          "label": "API key",
+          "type": "password",
+          "required": true,
+          "placeholder": "SG.…"
+        },
+        {
+          "key": "region",
+          "label": "Data residency",
+          "type": "select",
+          "default": "global",
+          "options": [
+            {
+              "value": "global",
+              "label": "Global (api.sendgrid.com)"
+            },
+            {
+              "value": "eu",
+              "label": "EU (api.eu.sendgrid.com)"
+            }
+          ]
+        },
+        {
+          "key": "eventWebhookKey",
+          "label": "Event webhook verification key",
+          "type": "password",
+          "help": "Optional: the public key from Event Webhook → Signature Verification, so Wren checks delivery events really come from SendGrid."
+        }
+      ],
+      "spfInclude": "sendgrid.net",
+      "dkimSelectors": [
+        "s1",
+        "s2"
+      ],
+      "inboundSetup": "In SendGrid go to Settings → Inbound Parse → Add Host & URL. Use your receiving (sub)domain, set the destination URL to {{url}} and tick “POST the raw, full MIME message”. Point the domain’s MX to mx.sendgrid.net.",
+      "eventsSetup": "In SendGrid → Settings → Mail Settings → Event Webhook, set the URL to {{url}} and select Delivered, Bounced, Dropped, Deferred and Spam Reports. If you turn on signature verification, paste the verification key here.",
+      "eventsWebhook": true,
+      "outboundSetup": "Complete Domain Authentication in SendGrid (Settings → Sender Authentication) and create an API key with Mail Send permission."
+    },
+    {
+      "type": "mailgun",
+      "name": "Mailgun",
+      "description": "Mailgun Messages API (raw MIME) and inbound Routes.",
+      "website": "https://www.mailgun.com",
+      "category": "api",
+      "outbound": true,
+      "inbound": true,
+      "rawMime": true,
+      "fields": [
+        {
+          "key": "apiKey",
+          "label": "API key",
+          "type": "password",
+          "required": true
+        },
+        {
+          "key": "domain",
+          "label": "Sending domain",
+          "type": "text",
+          "required": true,
+          "placeholder": "mg.example.com",
+          "help": "The domain as configured in Mailgun."
+        },
+        {
+          "key": "region",
+          "label": "Region",
+          "type": "select",
+          "default": "us",
+          "options": [
+            {
+              "value": "us",
+              "label": "US (api.mailgun.net)"
+            },
+            {
+              "value": "eu",
+              "label": "EU (api.eu.mailgun.net)"
+            }
+          ]
+        },
+        {
+          "key": "webhookSigningKey",
+          "label": "HTTP webhook signing key",
+          "type": "password",
+          "inbound": true,
+          "help": "Verifies that inbound route posts really come from Mailgun."
+        }
+      ],
+      "spfInclude": "mailgun.org",
+      "inboundSetup": "In Mailgun go to Send → Receiving → Create route. Match recipient (e.g. .*@example.com) and add the action forward(\"{{url}}/mime\") so Mailgun posts the full MIME. Point your MX to mxa.mailgun.org / mxb.mailgun.org (EU: mxa.eu.mailgun.org).",
+      "eventsSetup": "In Mailgun → Sending → Webhooks, add {{url}} for Delivered, Permanent failure, Temporary failure and Spam complaints. The HTTP webhook signing key verifies them.",
+      "eventsWebhook": true,
+      "outboundSetup": "Add and verify your domain in Mailgun (SPF, DKIM, MX for tracking), then copy a sending/private API key."
+    },
+    {
+      "type": "brevo",
+      "name": "Brevo (Sendinblue)",
+      "description": "Brevo transactional email API and inbound parsing webhooks.",
+      "website": "https://www.brevo.com",
+      "category": "api",
+      "outbound": true,
+      "inbound": true,
+      "rawMime": false,
+      "fields": [
+        {
+          "key": "apiKey",
+          "label": "API key (v3)",
+          "type": "password",
+          "required": true,
+          "placeholder": "xkeysib-…"
+        }
+      ],
+      "spfInclude": "spf.brevo.com",
+      "dkimSelectors": [
+        "brevo1",
+        "brevo2",
+        "mail"
+      ],
+      "inboundSetup": "Set up an inbound domain in Brevo (MX → inbound1.brevo.com / inbound2.brevo.com), then create a webhook of type “inbound” targeting {{url}}. Attachments are downloaded with the API key.",
+      "eventsSetup": "In Brevo → Transactional → Settings → Webhooks, add {{url}} with Delivered, Hard bounce, Soft bounce, Blocked, Deferred, Invalid email and Complaint.",
+      "eventsWebhook": true,
+      "outboundSetup": "Authenticate your domain in Brevo (Senders, Domains & Dedicated IPs → Domains) and create an API key."
+    },
+    {
+      "type": "mailjet",
+      "name": "Mailjet",
+      "description": "Mailjet Send API v3.1 and Parse API for inbound.",
+      "website": "https://www.mailjet.com",
+      "category": "api",
+      "outbound": true,
+      "inbound": true,
+      "rawMime": false,
+      "fields": [
+        {
+          "key": "apiKey",
+          "label": "API key",
+          "type": "text",
+          "required": true
+        },
+        {
+          "key": "secretKey",
+          "label": "Secret key",
+          "type": "password",
+          "required": true
+        }
+      ],
+      "spfInclude": "spf.mailjet.com",
+      "dkimSelectors": [
+        "mailjet"
+      ],
+      "inboundSetup": "Create a Parse API route (POST /v3/REST/parseroute) with Url {{url}} and either a Mailjet-provided parse address or your own domain with MX → parse.mailjet.com.",
+      "eventsSetup": "In Mailjet → Account settings → Event notifications (webhooks), set {{url}} for Sent, Bounce, Blocked and Spam.",
+      "eventsWebhook": true,
+      "outboundSetup": "Validate your domain and sender in Mailjet (SPF + DKIM), then copy the API key and secret key."
+    },
+    {
+      "type": "sparkpost",
+      "name": "SparkPost (Bird)",
+      "description": "SparkPost Transmissions API with raw RFC 822 content, and Relay Webhooks for inbound.",
+      "website": "https://www.sparkpost.com",
+      "category": "api",
+      "outbound": true,
+      "inbound": true,
+      "rawMime": true,
+      "fields": [
+        {
+          "key": "apiKey",
+          "label": "API key",
+          "type": "password",
+          "required": true
+        },
+        {
+          "key": "region",
+          "label": "Region",
+          "type": "select",
+          "default": "us",
+          "options": [
+            {
+              "value": "us",
+              "label": "US (api.sparkpost.com)"
+            },
+            {
+              "value": "eu",
+              "label": "EU (api.eu.sparkpost.com)"
+            }
+          ]
+        },
+        {
+          "key": "relayToken",
+          "label": "Relay webhook auth token",
+          "type": "password",
+          "inbound": true,
+          "help": "The auth_token set on the relay webhook."
+        }
+      ],
+      "spfInclude": "sparkpostmail.com",
+      "inboundSetup": "Create an inbound domain in SparkPost (MX → rx1/rx2/rx3.sparkpostmail.com), then a Relay Webhook targeting {{url}} with an auth token matching the one here.",
+      "eventsSetup": "In SparkPost → Webhooks, add {{url}} with the Delivery, Bounce, Delay, Spam complaint, Out-of-band and Policy rejection events.",
+      "eventsWebhook": true,
+      "outboundSetup": "Add and verify a sending domain in SparkPost, then create an API key with Transmissions: Read/Write."
+    },
+    {
+      "type": "mailersend",
+      "name": "MailerSend",
+      "description": "MailerSend email API.",
+      "website": "https://www.mailersend.com",
+      "category": "api",
+      "outbound": true,
+      "inbound": false,
+      "rawMime": false,
+      "fields": [
+        {
+          "key": "apiToken",
+          "label": "API token",
+          "type": "password",
+          "required": true
+        },
+        {
+          "key": "customHeaders",
+          "label": "Send custom headers (paid plans)",
+          "type": "boolean",
+          "default": false
+        },
+        {
+          "key": "webhookSecret",
+          "label": "Webhook signing secret",
+          "type": "password",
+          "help": "Optional: verifies delivery events from MailerSend webhooks."
+        }
+      ],
+      "spfInclude": "_spf.mailersend.net",
+      "dkimSelectors": [
+        "mlsend",
+        "mlsend2"
+      ],
+      "eventsSetup": "In MailerSend → Domains → Webhooks, add {{url}} with activity.delivered, activity.soft_bounced, activity.hard_bounced and activity.spam_complaint. Paste the signing secret here.",
+      "eventsWebhook": true,
+      "outboundSetup": "Add and verify your domain in MailerSend, then create an API token with Email: full access."
+    },
+    {
+      "type": "mailchannels",
+      "name": "MailChannels",
+      "description": "MailChannels Email API, popular for Cloudflare Workers and shared hosting.",
+      "website": "https://www.mailchannels.com",
+      "category": "api",
+      "outbound": true,
+      "inbound": false,
+      "rawMime": false,
+      "fields": [
+        {
+          "key": "apiKey",
+          "label": "API key",
+          "type": "password",
+          "required": true
+        },
+        {
+          "key": "dkimDomain",
+          "label": "DKIM domain",
+          "type": "text",
+          "help": "Optional: sign with your own DKIM key."
+        },
+        {
+          "key": "dkimSelector",
+          "label": "DKIM selector",
+          "type": "text"
+        },
+        {
+          "key": "dkimPrivateKey",
+          "label": "DKIM private key (base64)",
+          "type": "textarea"
+        }
+      ],
+      "spfInclude": "relay.mailchannels.net",
+      "eventsSetup": "In the MailChannels console → Webhooks, add {{url}} for delivered, hard-bounced, soft-bounced and complained events.",
+      "eventsWebhook": true,
+      "outboundSetup": "Create an API key in the MailChannels console and add the _mailchannels TXT “Domain Lockdown” record for your domain."
+    },
+    {
+      "type": "smtp2go",
+      "name": "SMTP2GO",
+      "description": "SMTP2GO HTTP API with raw MIME.",
+      "website": "https://www.smtp2go.com",
+      "category": "api",
+      "outbound": true,
+      "inbound": false,
+      "rawMime": true,
+      "fields": [
+        {
+          "key": "apiKey",
+          "label": "API key",
+          "type": "password",
+          "required": true,
+          "placeholder": "api-…"
+        },
+        {
+          "key": "region",
+          "label": "Region",
+          "type": "select",
+          "default": "global",
+          "options": [
+            {
+              "value": "global",
+              "label": "Global (api.smtp2go.com)"
+            },
+            {
+              "value": "us",
+              "label": "US (us-api.smtp2go.com)"
+            },
+            {
+              "value": "eu",
+              "label": "EU (eu-api.smtp2go.com)"
+            },
+            {
+              "value": "au",
+              "label": "AU (au-api.smtp2go.com)"
+            }
+          ]
+        }
+      ],
+      "spfInclude": "spf.smtp2go.com",
+      "eventsSetup": "In SMTP2GO → Settings → Webhooks, add {{url}} with the Delivered, Bounce, Reject and Spam events.",
+      "eventsWebhook": true,
+      "outboundSetup": "Verify your sender domain in SMTP2GO and create an API key with the “Emails” permission."
+    },
+    {
+      "type": "zeptomail",
+      "name": "ZeptoMail (Zoho)",
+      "description": "Zoho ZeptoMail transactional email API.",
+      "website": "https://www.zoho.com/zeptomail/",
+      "category": "api",
+      "outbound": true,
+      "inbound": false,
+      "rawMime": false,
+      "fields": [
+        {
+          "key": "token",
+          "label": "Send Mail token",
+          "type": "password",
+          "required": true,
+          "help": "Paste the token with or without the “Zoho-enczapikey” prefix."
+        },
+        {
+          "key": "region",
+          "label": "Data center",
+          "type": "select",
+          "default": "com",
+          "options": [
+            {
+              "value": "com",
+              "label": "api.zeptomail.com"
+            },
+            {
+              "value": "eu",
+              "label": "api.zeptomail.eu"
+            },
+            {
+              "value": "in",
+              "label": "api.zeptomail.in"
+            },
+            {
+              "value": "au",
+              "label": "api.zeptomail.com.au"
+            },
+            {
+              "value": "jp",
+              "label": "api.zeptomail.jp"
+            },
+            {
+              "value": "ca",
+              "label": "api.zeptomail.ca"
+            },
+            {
+              "value": "sa",
+              "label": "api.zeptomail.sa"
+            },
+            {
+              "value": "cn",
+              "label": "api.zeptomail.com.cn"
+            }
+          ]
+        }
+      ],
+      "spfInclude": "zeptomail.net",
+      "eventsSetup": "In ZeptoMail → Mail Agent → Webhooks, add {{url}} with Hard bounce, Soft bounce and Feedback loop events.",
+      "eventsWebhook": true,
+      "outboundSetup": "Add and verify your domain in ZeptoMail (SPF/DKIM), then copy the Send Mail token from your Mail Agent."
+    },
+    {
+      "type": "elasticemail",
+      "name": "Elastic Email",
+      "description": "Elastic Email v4 transactional API.",
+      "website": "https://elasticemail.com",
+      "category": "api",
+      "outbound": true,
+      "inbound": false,
+      "rawMime": false,
+      "fields": [
+        {
+          "key": "apiKey",
+          "label": "API key",
+          "type": "password",
+          "required": true
+        }
+      ],
+      "spfInclude": "_spf.elasticemail.com",
+      "eventsSetup": "In Elastic Email → Settings → Notifications, add {{url}} as the webhook URL and tick Sent, Error (bounces) and Abuse reports.",
+      "eventsWebhook": true,
+      "outboundSetup": "Verify your domain in Elastic Email (SPF, DKIM, tracking) and create an API key with “Send Email” access."
+    },
+    {
+      "type": "mailtrap",
+      "name": "Mailtrap",
+      "description": "Mailtrap Email Sending API (transactional or bulk stream).",
+      "website": "https://mailtrap.io",
+      "category": "api",
+      "outbound": true,
+      "inbound": false,
+      "rawMime": false,
+      "fields": [
+        {
+          "key": "apiToken",
+          "label": "API token",
+          "type": "password",
+          "required": true
+        },
+        {
+          "key": "stream",
+          "label": "Stream",
+          "type": "select",
+          "default": "transactional",
+          "options": [
+            {
+              "value": "transactional",
+              "label": "Transactional (send.api.mailtrap.io)"
+            },
+            {
+              "value": "bulk",
+              "label": "Bulk (bulk.api.mailtrap.io)"
+            }
+          ]
+        }
+      ],
+      "spfInclude": "_spf.smtp.mailtrap.live",
+      "eventsSetup": "In Mailtrap → Sending Domains → Webhooks, add {{url}} with Delivery, Bounce, Soft bounce, Reject and Spam.",
+      "eventsWebhook": true,
+      "outboundSetup": "Verify your sending domain in Mailtrap and create an API token for it."
+    },
+    {
+      "type": "scaleway",
+      "name": "Scaleway TEM",
+      "description": "Scaleway Transactional Email (EU-hosted).",
+      "website": "https://www.scaleway.com/en/transactional-email-tem/",
+      "category": "api",
+      "outbound": true,
+      "inbound": false,
+      "rawMime": false,
+      "fields": [
+        {
+          "key": "secretKey",
+          "label": "Secret key",
+          "type": "password",
+          "required": true
+        },
+        {
+          "key": "projectId",
+          "label": "Project ID",
+          "type": "text",
+          "required": true
+        },
+        {
+          "key": "region",
+          "label": "Region",
+          "type": "select",
+          "default": "fr-par",
+          "options": [
+            {
+              "value": "fr-par",
+              "label": "Paris (fr-par)"
+            }
+          ]
+        }
+      ],
+      "spfInclude": "_spf.tem.scaleway.com",
+      "eventsSetup": "In Scaleway TEM → Webhooks, send the delivered, dropped, deferred, mailbox-not-found, blocklisted and spam events to a Topics and Events topic, and subscribe {{url}} to it over HTTPS.",
+      "eventsWebhook": true,
+      "outboundSetup": "Add and verify your domain in Scaleway TEM, then create an API key with TransactionalEmailFullAccess."
+    },
+    {
+      "type": "smtp",
+      "name": "SMTP relay",
+      "description": "Any SMTP server: Gmail / Google Workspace, Microsoft 365, Fastmail, Zoho, iCloud, Postfix, or a provider’s SMTP endpoint.",
+      "website": "https://en.wikipedia.org/wiki/Simple_Mail_Transfer_Protocol",
+      "category": "smtp",
+      "outbound": true,
+      "inbound": false,
+      "rawMime": true,
+      "fields": [
+        {
+          "key": "host",
+          "label": "Host",
+          "type": "text",
+          "required": true,
+          "placeholder": "smtp.example.com"
+        },
+        {
+          "key": "port",
+          "label": "Port",
+          "type": "number",
+          "required": true,
+          "default": 587
+        },
+        {
+          "key": "security",
+          "label": "Security",
+          "type": "select",
+          "default": "starttls",
+          "options": [
+            {
+              "value": "starttls",
+              "label": "STARTTLS (587)"
+            },
+            {
+              "value": "tls",
+              "label": "Implicit TLS (465)"
+            },
+            {
+              "value": "none",
+              "label": "None (not recommended)"
+            }
+          ]
+        },
+        {
+          "key": "username",
+          "label": "Username",
+          "type": "text"
+        },
+        {
+          "key": "password",
+          "label": "Password / app password",
+          "type": "password"
+        }
+      ],
+      "eventsSetup": "Bounce messages and spam reports that come back to the sender are read automatically.",
+      "eventsWebhook": false,
+      "outboundSetup": "Use an app password where your provider requires one (Gmail, iCloud, Fastmail). The From address must be allowed by the SMTP account.",
+      "presets": [
+        {
+          "label": "Gmail / Google Workspace",
+          "values": {
+            "host": "smtp.gmail.com",
+            "port": 587,
+            "security": "starttls"
+          }
+        },
+        {
+          "label": "Google Workspace SMTP relay",
+          "values": {
+            "host": "smtp-relay.gmail.com",
+            "port": 587,
+            "security": "starttls"
+          }
+        },
+        {
+          "label": "Microsoft 365 / Outlook",
+          "values": {
+            "host": "smtp.office365.com",
+            "port": 587,
+            "security": "starttls"
+          }
+        },
+        {
+          "label": "Fastmail",
+          "values": {
+            "host": "smtp.fastmail.com",
+            "port": 465,
+            "security": "tls"
+          }
+        },
+        {
+          "label": "Zoho Mail",
+          "values": {
+            "host": "smtp.zoho.com",
+            "port": 465,
+            "security": "tls"
+          }
+        },
+        {
+          "label": "iCloud Mail",
+          "values": {
+            "host": "smtp.mail.me.com",
+            "port": 587,
+            "security": "starttls"
+          }
+        },
+        {
+          "label": "Amazon SES SMTP (us-east-1)",
+          "values": {
+            "host": "email-smtp.us-east-1.amazonaws.com",
+            "port": 587,
+            "security": "starttls"
+          }
+        },
+        {
+          "label": "SendGrid SMTP",
+          "values": {
+            "host": "smtp.sendgrid.net",
+            "port": 587,
+            "security": "starttls",
+            "username": "apikey"
+          }
+        },
+        {
+          "label": "Mailgun SMTP",
+          "values": {
+            "host": "smtp.mailgun.org",
+            "port": 587,
+            "security": "starttls"
+          }
+        },
+        {
+          "label": "Postmark SMTP",
+          "values": {
+            "host": "smtp.postmarkapp.com",
+            "port": 587,
+            "security": "starttls"
+          }
+        },
+        {
+          "label": "Brevo SMTP",
+          "values": {
+            "host": "smtp-relay.brevo.com",
+            "port": 587,
+            "security": "starttls"
+          }
+        },
+        {
+          "label": "Resend SMTP",
+          "values": {
+            "host": "smtp.resend.com",
+            "port": 465,
+            "security": "tls",
+            "username": "resend"
+          }
+        }
+      ]
+    },
+    {
+      "type": "cloudflare",
+      "name": "Cloudflare Email Service (API token)",
+      "description": "Send through the Email Sending REST API, for example from another Cloudflare account. Most setups should use the built-in Cloudflare Email Service instead.",
+      "website": "https://developers.cloudflare.com/email-service/",
+      "category": "api",
+      "outbound": true,
+      "inbound": false,
+      "rawMime": true,
+      "fields": [
+        {
+          "key": "accountId",
+          "label": "Account ID",
+          "type": "text",
+          "required": true,
+          "help": "Found in the Cloudflare dashboard sidebar."
+        },
+        {
+          "key": "apiToken",
+          "label": "API token",
+          "type": "password",
+          "required": true,
+          "help": "A token with the Email Sending “Send” permission for this account."
+        }
+      ],
+      "dkimSelectors": [
+        "cf2024-1"
+      ],
+      "eventsSetup": "Bounce messages and spam reports that come back to the sender are read automatically.",
+      "eventsWebhook": false,
+      "outboundSetup": "Onboard your domain under Email Service → Email Sending in the Cloudflare dashboard, then create an API token that can send email."
+    },
+    {
+      "type": "postal",
+      "name": "Postal (self-hosted)",
+      "description": "Postal open-source mail server — send raw MIME via its API and receive via HTTP endpoints.",
+      "website": "https://docs.postalserver.io",
+      "category": "self-hosted",
+      "outbound": true,
+      "inbound": true,
+      "rawMime": true,
+      "fields": [
+        {
+          "key": "baseUrl",
+          "label": "Postal URL",
+          "type": "url",
+          "required": true,
+          "placeholder": "https://postal.example.com"
+        },
+        {
+          "key": "apiKey",
+          "label": "Server API key",
+          "type": "password",
+          "required": true
+        }
+      ],
+      "inboundSetup": "In Postal add an HTTP Endpoint with URL {{url}} and format “Raw message”, then a route for your address(es) pointing to it.",
+      "eventsSetup": "In Postal → your mail server → Webhooks, add {{url}} with MessageSent, MessageDelayed, MessageDeliveryFailed and MessageBounced.",
+      "eventsWebhook": true,
+      "outboundSetup": "Create a mail server and an API credential in Postal, and add the domain with its DNS records."
+    },
+    {
+      "type": "webhook",
+      "name": "Custom HTTP webhook",
+      "description": "POST every outgoing message as signed JSON to your own endpoint; accept generic JSON inbound.",
+      "website": "https://en.wikipedia.org/wiki/Webhook",
+      "category": "other",
+      "outbound": true,
+      "inbound": true,
+      "rawMime": true,
+      "fields": [
+        {
+          "key": "url",
+          "label": "Endpoint URL",
+          "type": "url",
+          "required": true
+        },
+        {
+          "key": "secret",
+          "label": "Signing secret",
+          "type": "password",
+          "help": "Adds X-Wren-Signature: sha256=HMAC(body)."
+        },
+        {
+          "key": "authHeader",
+          "label": "Authorization header",
+          "type": "password",
+          "help": "Optional value sent as the Authorization header."
+        }
+      ],
+      "inboundSetup": "POST JSON to {{url}} — either {\"raw\": \"<base64 RFC 822>\", \"base64\": true, \"rcptTo\": [...]} or {\"from\",\"to\",\"cc\",\"subject\",\"text\",\"html\",\"headers\",\"attachments\":[{\"filename\",\"contentType\",\"content\"(base64)}]}.",
+      "eventsSetup": "Your endpoint can POST delivery status to {{url}} as {\"events\": [{\"messageId\", \"type\": \"delivered\" | \"bounced\" | \"complained\" | \"delayed\", \"recipients\": [...], \"permanent\": true}]}.",
+      "eventsWebhook": true,
+      "outboundSetup": "Wren POSTs JSON {from,to,cc,bcc,envelope,subject,text,html,headers,messageId,raw(base64),attachments[]}. Respond 2xx (optionally with {\"id\": \"…\"})."
+    },
+    {
+      "type": "raw",
+      "name": "Raw MIME (HTTP)",
+      "description": "Accept original RFC 822 messages over HTTP — for MTA pipes (Postfix, Exim), scripts, or custom workers.",
+      "website": "",
+      "category": "inbound",
+      "outbound": false,
+      "inbound": true,
+      "rawMime": true,
+      "fields": [],
+      "inboundSetup": "POST the message bytes to {{url}} with Content-Type: message/rfc822 and optional X-Rcpt-To / X-Mail-From headers. Postfix example: curl -sf --data-binary @- -H \"Content-Type: message/rfc822\" -H \"X-Rcpt-To: ${recipient}\" {{url}}",
+      "eventsWebhook": true
+    },
+    {
+      "type": "forwardemail",
+      "name": "Forward Email",
+      "description": "Receive through forwardemail.net webhooks (privacy-focused, open-source forwarding).",
+      "website": "https://forwardemail.net",
+      "category": "inbound",
+      "outbound": false,
+      "inbound": true,
+      "rawMime": true,
+      "fields": [
+        {
+          "key": "webhookKey",
+          "label": "Webhook signature key",
+          "type": "password",
+          "inbound": true,
+          "help": "Verifies X-Webhook-Signature."
+        }
+      ],
+      "inboundSetup": "Add a TXT record forward-email=<address>:{{url}} (or configure the webhook in your Forward Email dashboard).",
+      "eventsWebhook": true
+    },
+    {
+      "type": "cloudmailin",
+      "name": "CloudMailin",
+      "description": "Receive through CloudMailin (JSON Normalized or Raw format).",
+      "website": "https://www.cloudmailin.com",
+      "category": "inbound",
+      "outbound": false,
+      "inbound": true,
+      "rawMime": false,
+      "fields": [],
+      "inboundSetup": "Set your CloudMailin address target to {{url}} using the “JSON (Normalized)” or “Multipart (Raw)” format.",
+      "eventsWebhook": true
+    },
+    {
+      "type": "log",
+      "name": "Log only (testing)",
+      "description": "Pretends to send: records the message in the server log. Useful for trying Wren without credentials.",
+      "website": "",
+      "category": "other",
+      "outbound": true,
+      "inbound": false,
+      "rawMime": true,
+      "fields": [],
+      "eventsWebhook": false,
+      "outboundSetup": "Nothing is delivered to external recipients. Local recipients on this server still receive mail."
+    }
+  ]
+}

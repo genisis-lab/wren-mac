@@ -1,0 +1,48 @@
+{
+  "users": [
+    {
+      "locked": false,
+      "id": 1,
+      "email": "admin@wren.test",
+      "name": "Ada Admin",
+      "role": "owner",
+      "status": "active",
+      "usedBytes": 2302,
+      "quotaBytes": 10737418240,
+      "customQuota": false,
+      "sendLimitPerDay": 500,
+      "customSendLimit": false,
+      "totpEnabled": false,
+      "createdAt": 1794544834408,
+      "lastLoginAt": 1794544834476,
+      "aliases": 1,
+      "messages": 4,
+      "recoveryEmail": null,
+      "mustChangePassword": false,
+      "mailAppsBlocked": false,
+      "legalHold": false
+    },
+    {
+      "locked": false,
+      "id": 2,
+      "email": "sam@wren.test",
+      "name": "Sam Lee",
+      "role": "user",
+      "status": "active",
+      "usedBytes": 626,
+      "quotaBytes": 2147483648,
+      "customQuota": true,
+      "sendLimitPerDay": 500,
+      "customSendLimit": false,
+      "totpEnabled": false,
+      "createdAt": 1794544834533,
+      "lastLoginAt": null,
+      "aliases": 0,
+      "messages": 1,
+      "recoveryEmail": null,
+      "mustChangePassword": false,
+      "mailAppsBlocked": false,
+      "legalHold": true
+    }
+  ]
+}

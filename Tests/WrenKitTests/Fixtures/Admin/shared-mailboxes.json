@@ -1,0 +1,21 @@
+{
+  "mailboxes": [
+    {
+      "id": 3,
+      "address": "support@wren.test",
+      "name": "Support",
+      "status": "active",
+      "usedBytes": 0,
+      "quotaBytes": 10737418240,
+      "unread": 0,
+      "members": [
+        {
+          "userId": 2,
+          "email": "sam@wren.test",
+          "name": "Sam Lee",
+          "canSend": false
+        }
+      ]
+    }
+  ]
+}

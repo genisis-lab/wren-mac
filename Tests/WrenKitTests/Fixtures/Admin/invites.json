@@ -1,0 +1,16 @@
+{
+  "invites": [
+    {
+      "id": 1,
+      "email": "new@wren.test",
+      "role": "user",
+      "expires_at": 1795149634697,
+      "used_at": null,
+      "created_at": 1794544834697,
+      "sent_to": null,
+      "emailed_at": null,
+      "domain": null,
+      "used_by_email": null
+    }
+  ]
+}
