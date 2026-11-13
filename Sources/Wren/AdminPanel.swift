@@ -766,7 +766,7 @@ private struct RoleBadge: View {
 
 /// A change to someone that needs a second look before it's made.
 private enum Confirm: Identifiable {
-    case suspend, signOut, reset2fa, delete, releaseHold, revokeSession(String)
+    case suspend, signOut, reset2fa, delete, releaseHold, revokeSession(String), role(String)
 
     var id: String {
         switch self {
@@ -776,7 +776,14 @@ private enum Confirm: Identifiable {
         case .delete: "delete"
         case .releaseHold: "releaseHold"
         case .revokeSession(let id): "session \(id)"
+        case .role(let role): "role \(role)"
         }
+    }
+
+    /// Taking something away; a new role only changes what they may do.
+    var isDestructive: Bool {
+        if case .role = self { return false }
+        return true
     }
 }
 
@@ -802,7 +809,8 @@ struct AdminUserDetailView: View {
                     if u.status == "suspended" { Text("Suspended").foregroundStyle(.red) }
                 }
                 if !panel.isHelpdesk {
-                    Picker("Role", selection: Binding(get: { u.role }, set: { role in panel.change("PUT", path, ["role": .string(role)]) })) {
+                    // Asks first: a role decides who can manage everyone's accounts.
+                    Picker("Role", selection: Binding(get: { u.role }, set: { role in if role != u.role { confirming = .role(role) } })) {
                         Text("User").tag("user")
                         Text("Helpdesk").tag("helpdesk")
                         Text("Admin").tag("admin")
@@ -823,7 +831,7 @@ struct AdminUserDetailView: View {
         }
         .formStyle(.grouped)
         .confirmationDialog(title, isPresented: Binding(get: { confirming != nil }, set: { if !$0 { confirming = nil } }), presenting: confirming) { c in
-            Button(button(c), role: .destructive) { perform(c) }
+            Button(button(c), role: c.isDestructive ? .destructive : nil) { perform(c) }
         } message: { c in
             Text(message(c))
         }
@@ -958,6 +966,7 @@ struct AdminUserDetailView: View {
         case .delete: return "Delete \(u.email)?"
         case .releaseHold: return "Release the legal hold on \(u.email)?"
         case .revokeSession: return "Sign out this browser?"
+        case .role(let role): return role == "user" ? "Make \(u.email) an ordinary user?" : "Make \(u.email) \(role == "admin" ? "an admin" : role == "owner" ? "an owner" : "helpdesk staff")?"
         }
     }
 
@@ -968,6 +977,7 @@ struct AdminUserDetailView: View {
         case .reset2fa: "Reset 2-Step"
         case .delete: "Delete Account"
         case .releaseHold: "Release Hold"
+        case .role: "Change Role"
         }
     }
 
@@ -979,6 +989,13 @@ struct AdminUserDetailView: View {
         case .delete: "Their mail, contacts and settings are deleted for good. This can’t be undone."
         case .releaseHold: "Their mail can be deleted again as usual: by retention, by them, or by deleting the account."
         case .revokeSession: "That browser is signed out; they can sign in again."
+        case .role(let role):
+            switch role {
+            case "owner": "Owners can do everything an admin can, and make or remove other owners and admins."
+            case "admin": "Admins can manage everyone’s accounts, domains, sending and server settings, and open the admin panel here after confirming it’s them."
+            case "helpdesk": "Helpdesk staff can suspend, sign out and reset ordinary users, and invite people. Nothing else in the admin panel."
+            default: "They can no longer open the admin panel."
+            }
         }
     }
 
@@ -990,6 +1007,7 @@ struct AdminUserDetailView: View {
         case .delete: panel.deleteUser(u.id)
         case .releaseHold: panel.change("PUT", "\(path)/legal-hold", ["hold": false])
         case .revokeSession(let id): panel.change("DELETE", "\(path)/sessions/\(id)")
+        case .role(let role): panel.change("PUT", path, ["role": .string(role)])
         }
         confirming = nil
     }
@@ -1092,6 +1110,7 @@ private struct NewUserSheet: View {
 struct AdminInvitesPage: View {
     @Bindable var panel: AdminPanel
     @State private var inviting = false
+    @State private var deleting: AdminInvite?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -1115,13 +1134,22 @@ struct AdminInvitesPage: View {
                                 panel.change("POST", "/invites/\(invite.id)/resend", ["sendTo": .string(to)]) { _ in (text: "Sent again to \(to).", link: nil) }
                             }
                         }
-                        Button(role: .destructive) { panel.change("DELETE", "/invites/\(invite.id)") } label: { Image(systemName: "trash") }
+                        Button(role: .destructive) { deleting = invite } label: { Image(systemName: "trash") }
                             .accessibilityLabel("Delete Invitation")
                     }
                 }
             }
         }
         .sheet(isPresented: $inviting) { NewInviteSheet(panel: panel) }
+        .confirmationDialog(
+            "Delete the invitation\(deleting?.email.map { " for \($0)" } ?? "")?",
+            isPresented: Binding(get: { deleting != nil }, set: { if !$0 { deleting = nil } }),
+            presenting: deleting
+        ) { invite in
+            Button("Delete Invitation", role: .destructive) { panel.change("DELETE", "/invites/\(invite.id)") }
+        } message: { _ in
+            Text("Its link stops working. You can make a new invitation later.")
+        }
     }
 
     private func status(_ i: AdminInvite) -> String {
