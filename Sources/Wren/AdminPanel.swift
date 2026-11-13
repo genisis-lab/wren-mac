@@ -99,6 +99,7 @@ final class AdminPanel {
     var selectedDomain: Int?
     var settingsTab = AdminSettingsTab.general
 
+    @ObservationIgnored private var operation: Task<Void, Never>?
     @ObservationIgnored private var waiting: Task<Void, Never>?
     @ObservationIgnored private var idleLock: Task<Void, Never>?
     @ObservationIgnored private var observers: [(NotificationCenter, NSObjectProtocol)] = []
@@ -187,6 +188,7 @@ final class AdminPanel {
                     return
                 }
             } catch {
+                guard !Task.isCancelled else { return }
                 self.error = error.localizedDescription
                 stage = .password
                 return
@@ -206,6 +208,7 @@ final class AdminPanel {
     }
 
     func cancel() {
+        lock()
         waiting?.cancel()
         error = nil
         emailSentTo = nil
@@ -213,6 +216,8 @@ final class AdminPanel {
     }
 
     private func unlocked() async {
+        let expected = generation
+        guard let login, await login.admin.isUnlocked, !Task.isCancelled, generation == expected else { return }
         waiting?.cancel()
         error = nil
         stage = .unlocked
@@ -253,6 +258,7 @@ final class AdminPanel {
 
     /// Back to the password, forgetting what was shown.
     private func lockedOut(message: String?) {
+        operation?.cancel()
         waiting?.cancel()
         idleLock?.cancel()
         stage = .password
@@ -275,16 +281,18 @@ final class AdminPanel {
         guard !busy else { return }
         busy = true
         error = nil
-        Task {
+        operation = Task {
             defer { busy = false }
             do {
                 try await work()
+            } catch where Task.isCancelled {
+                return
             } catch AdminError.locked {
                 lockedOut(message: AdminError.locked.errorDescription)
             } catch {
                 self.error = error.localizedDescription
             }
-            await noteActivity()
+            if !Task.isCancelled { await noteActivity() }
         }
     }
 
@@ -798,12 +806,13 @@ func adminAgo(_ ms: Double?) -> String {
 }
 
 func adminBytes(_ n: Double?) -> String {
-    ByteCountFormatter.string(fromByteCount: Int64(n ?? 0), countStyle: .file)
+    guard let n, let bytes = Int64(exactly: n.rounded(.towardZero)) else { return "—" }
+    return ByteCountFormatter.string(fromByteCount: bytes, countStyle: .file)
 }
 
 /// "87%", or a dash when there's nothing to count.
 func adminPercent(_ n: Double?) -> String {
-    n.map { "\(Int($0.rounded()))%" } ?? "—"
+    n.flatMap { Int(exactly: $0.rounded()) }.map { "\($0)%" } ?? "—"
 }
 
 /// Copies a value to the clipboard.

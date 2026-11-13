@@ -145,7 +145,7 @@ struct SettingsBinder {
     }
 
     func int(_ key: String) -> Binding<Int> {
-        Binding(get: { Int(draft.wrappedValue[key]?.number ?? 0) }, set: { draft.wrappedValue[key] = .number(Double($0)) })
+        Binding(get: { draft.wrappedValue[key]?.int ?? 0 }, set: { draft.wrappedValue[key] = .number(Double($0)) })
     }
 
     func double(_ key: String) -> Binding<Double> {

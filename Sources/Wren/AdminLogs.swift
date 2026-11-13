@@ -209,7 +209,7 @@ private struct DeliveryLog: View {
     private var filtered: Bool { !search.isEmpty || !event.isEmpty || !domain.isEmpty || user != nil }
 
     private func path(before: Double?) -> String {
-        "/delivery-log" + adminQuery(["q": search, "event": event, "domain": domain, "user": user.map { String($0) }, "before": before.map { String(Int($0)) }])
+        "/delivery-log" + adminQuery(["q": search, "event": event, "domain": domain, "user": user.map { String($0) }, "before": before.flatMap { Int(exactly: $0.rounded(.towardZero)) }.map(String.init)])
     }
 
     private func more() async {
@@ -302,7 +302,7 @@ private struct InboundLog: View {
     }
 
     private func path(before: Double?) -> String {
-        "/inbound-log" + adminQuery(["q": search, "status": status, "domain": domain, "before": before.map { String(Int($0)) }])
+        "/inbound-log" + adminQuery(["q": search, "status": status, "domain": domain, "before": before.flatMap { Int(exactly: $0.rounded(.towardZero)) }.map(String.init)])
     }
 
     private func more() async {
@@ -849,7 +849,7 @@ private struct AuditRow: View {
     private static func text(_ j: JSON) -> String {
         switch j {
         case .string(let s): return s
-        case .number(let n): return n.rounded() == n ? String(Int(n)) : String(n)
+        case .number(let n): return Int(exactly: n).map(String.init) ?? String(n)
         case .bool(let b): return b ? "yes" : "no"
         case .null: return "—"
         default:

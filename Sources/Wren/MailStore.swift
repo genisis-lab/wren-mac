@@ -317,6 +317,7 @@ final class MailStore {
 
     /// Sign out of one sign-in: its app password and the mail kept on this Mac are deleted.
     func remove(_ login: Login, message: String? = nil) {
+        guard self.login(login.id) === login else { return }
         login.listening?.cancel()
         // Its admin unlock ends with it, here and on the server.
         AdminPanel.shared.signedOut(login)
@@ -469,6 +470,7 @@ final class MailStore {
             do {
                 for account in login.accounts { login.mailboxes[account.id] = try await login.client.mailboxes(account: account.id) }
                 if let personal = login.personal, personal.capabilities.contains(Capability.quota) { login.quota = try await login.client.quota(account: personal.id) }
+                guard self.login(login.id) === login else { continue }
                 login.cache.state = .init(accounts: login.accounts, mailboxes: login.mailboxes, identities: login.identities)
                 login.problem = nil
             } catch {
@@ -515,6 +517,7 @@ final class MailStore {
                 guard let old = login.states[account] else { throw JMAPError.method("cannotCalculateChanges", nil) }
                 let changes = try await login.client.emailChanges(account: account, since: old)
                 login.mailboxes[account] = try await login.client.mailboxes(account: account)
+                guard self.login(login.id) === login else { return }
                 login.states[account] = changes.newState == old ? newState : changes.newState
                 guard !changes.isEmpty else { continue }
                 if !changes.created.isEmpty { arrived = true }
@@ -522,6 +525,7 @@ final class MailStore {
                 let open = threadPlace.map { $0.login == login.id && $0.account == account } ?? false
                 guard shown || open else { continue }
                 let fetched = try await login.client.emails(changes.created + changes.updated, account: account)
+                guard self.login(login.id) === login else { return }
                 if shown {
                     if !changes.created.isEmpty || !changes.destroyed.isEmpty || searchingEverywhere {
                         listChanged = true
@@ -628,6 +632,7 @@ final class MailStore {
                     let folders = boxes.filter { $0.role != nil }
                     do {
                         let page = try await login.client.conversations(account: account.id, mailbox: nil, excluding: skip, search: search, unreadOnly: unreadOnly, limit: limit)
+                        guard self.login(login.id) === login else { continue }
                         for c in page.list {
                             let folder = folders.first { c.email.mailboxIds[$0.id] == true } ?? folders.first { $0.role == "inbox" }
                             rows.append((c, MailboxRef(login: login.id, account: account.id, mailbox: folder?.id ?? "")))
@@ -644,6 +649,7 @@ final class MailStore {
             guard let login = login(place.login) else { continue }
             do {
                 let page = try await login.client.conversations(account: place.account, mailbox: place.mailbox, search: search, unreadOnly: unreadOnly, limit: limit)
+                guard self.login(login.id) === login else { continue }
                 rows += page.list.map { ($0, place) }
                 total += page.total
                 loaded = true
@@ -722,7 +728,7 @@ final class MailStore {
         guard let place = threadPlace, let login = login(place.login) else { return }
         do {
             let emails = try await login.client.conversation(account: place.account, threadId: id)
-            guard threadId == id else { return }
+            guard threadId == id, self.login(login.id) === login else { return }
             login.cache.saveThread(emails, id: id)
             thread = visible(emails, in: place)
         } catch {

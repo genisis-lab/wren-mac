@@ -196,7 +196,8 @@ private struct SystemInfo: View {
     static func fileCount(_ n: Int) -> String { "\(n.formatted()) \(n == 1 ? "file" : "files")" }
 
     static func duration(_ ms: Double) -> String {
-        Duration.milliseconds(Int64(ms)).formatted(.units(allowed: [.days, .hours, .minutes, .seconds], width: .wide, maximumUnitCount: 2))
+        guard let milliseconds = Int64(exactly: ms.rounded(.towardZero)) else { return "—" }
+        return Duration.milliseconds(milliseconds).formatted(.units(allowed: [.days, .hours, .minutes, .seconds], width: .wide, maximumUnitCount: 2))
     }
 }
 

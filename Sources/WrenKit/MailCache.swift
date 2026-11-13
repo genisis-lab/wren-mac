@@ -26,6 +26,28 @@ public struct MailCache: Sendable {
         }
     }
 
+    /// Copies of this cache share a lifetime. Late requests cannot recreate a signed-out account's files.
+    private final class Lifetime: @unchecked Sendable {
+        private let lock = NSLock()
+        private var active = true
+
+        func whileActive<T>(_ work: () -> T) -> T? {
+            lock.lock()
+            defer { lock.unlock() }
+            guard active else { return nil }
+            return work()
+        }
+
+        func invalidate(_ work: () -> Void) {
+            lock.lock()
+            defer { lock.unlock() }
+            guard active else { return }
+            active = false
+            work()
+        }
+    }
+
+    private let lifetime = Lifetime()
     public let folder: URL
     /// How many opened conversations to keep.
     public let keep: Int
@@ -43,12 +65,16 @@ public struct MailCache: Sendable {
 
     private func write<T: Encodable>(_ value: T, to url: URL) {
         // A cache: if it can't be written, the app still works from the server.
-        try? FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
-        try? JSONEncoder().encode(value).write(to: url, options: .atomic)
+        lifetime.whileActive {
+            try? FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try? JSONEncoder().encode(value).write(to: url, options: .atomic)
+        }
     }
 
     private func read<T: Decodable>(_ type: T.Type, from url: URL) -> T? {
-        (try? Data(contentsOf: url)).flatMap { try? JSONDecoder().decode(T.self, from: $0) }
+        lifetime.whileActive {
+            (try? Data(contentsOf: url)).flatMap { try? JSONDecoder().decode(T.self, from: $0) }
+        } ?? nil
     }
 
     public var state: State? {
@@ -71,15 +97,17 @@ public struct MailCache: Sendable {
     /// Keep a conversation, and forget the ones opened longest ago beyond `keep`.
     public func saveThread(_ emails: [Email], id: String) {
         write(emails, to: file("threads", id))
-        let folder = folder.appendingPathComponent("threads")
-        let files = (try? FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: [.contentModificationDateKey])) ?? []
-        guard files.count > keep else { return }
-        let date = { (url: URL) in (try? url.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast }
-        for old in files.sorted(by: { date($0) > date($1) }).dropFirst(keep) { try? FileManager.default.removeItem(at: old) }
+        lifetime.whileActive {
+            let folder = folder.appendingPathComponent("threads")
+            let files = (try? FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: [.contentModificationDateKey])) ?? []
+            guard files.count > keep else { return }
+            let date = { (url: URL) in (try? url.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast }
+            for old in files.sorted(by: { date($0) > date($1) }).dropFirst(max(0, keep)) { try? FileManager.default.removeItem(at: old) }
+        }
     }
 
-    /// Everything, for signing out.
+    /// Everything, for signing out. This instance and its copies cannot be used again; a new sign-in gets a new cache.
     public func delete() {
-        try? FileManager.default.removeItem(at: folder)
+        lifetime.invalidate { try? FileManager.default.removeItem(at: folder) }
     }
 }

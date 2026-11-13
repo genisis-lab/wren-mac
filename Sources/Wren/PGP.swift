@@ -49,6 +49,20 @@ final class PGP {
 
     /// Sign-ins whose key is open for this run of Wren.
     private(set) var unlocked: Set<String> = []
+    private var keyGeneration = UUID()
+    private var loginGenerations: [String: UUID] = [:]
+
+    private func generation(for login: String) -> [UUID] {
+        [keyGeneration] + (loginGenerations[login].map { [$0] } ?? [])
+    }
+
+    private func requireCurrent(_ expected: [UUID], login: String) async throws {
+        guard !Task.isCancelled, generation(for: login) == expected else {
+            // The engine may have started after Lock while its WKWebView was still loading.
+            _ = try? await call("lock", [login])
+            throw Failure("The PGP key was locked. Unlock it again.")
+        }
+    }
     /// Each sign-in's key as kept on this Mac (nil: none), read from the keychain once.
     private var keys: [String: KeyInfo?] = [:]
     /// Keys restored while the keychain refused them: kept (still protected) until Wren quits, as the web app does.
@@ -76,11 +90,14 @@ final class PGP {
 
     /// The key backed up in Wren on the web, opened with its passphrase and kept in the keychain.
     func restore(_ login: Login, passphrase: String) async throws -> KeyInfo {
+        let expected = generation(for: login.id)
         guard let account = login.personal?.id else { throw NotConnected() }
         guard let backup = try await login.client.pgpBackup(account: account) else {
             throw Failure("There’s no key backup in Wren. Back up your key in Wren on the web first: Settings → Encryption.")
         }
+        try await requireCurrent(expected, login: login.id)
         let info = try describe(await call("unlock", [login.id, backup.armored, passphrase]))
+        try await requireCurrent(expected, login: login.id)
         do {
             try Keychain.save(backup.armored, username: login.username, server: login.client.server, kind: "PGP")
         } catch {
@@ -92,8 +109,10 @@ final class PGP {
     }
 
     func unlock(_ login: Login, passphrase: String) async throws {
+        let expected = generation(for: login.id)
         guard let armored = armored(login) else { throw Failure("There’s no PGP key on this Mac. Restore yours in Settings → Encryption.") }
         _ = try await call("unlock", [login.id, armored, passphrase])
+        try await requireCurrent(expected, login: login.id)
         unlocked.insert(login.id)
     }
 
@@ -131,7 +150,14 @@ final class PGP {
 
     /// Close a sign-in's key (every key, without one) until its passphrase is entered again.
     func lock(_ login: Login? = nil) {
-        if let login { unlocked.remove(login.id) } else { unlocked = [] }
+        if let login {
+            loginGenerations[login.id] = UUID()
+            unlocked.remove(login.id)
+        } else {
+            keyGeneration = UUID()
+            loginGenerations.removeAll()
+            unlocked = []
+        }
         Task { _ = try? await call("lock", [Self.orNull(login?.id)]) }
     }
 

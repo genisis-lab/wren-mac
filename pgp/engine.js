@@ -6,6 +6,7 @@ import * as openpgp from 'openpgp';
 import PostalMime from 'postal-mime';
 
 const unlocked = new Map(); // sign-in → PrivateKey
+const unlockAttempts = new Map(); // sign-in → latest attempt; Lock invalidates pending decryptions too
 
 const fromBase64 = (s) => Uint8Array.from(atob(s), (c) => c.charCodeAt(0));
 function toBase64(bytes) {
@@ -79,6 +80,8 @@ const api = {
 
   /** A backed-up key: it must be passphrase-protected, and the passphrase must open it. Keeps it unlocked for `login`. */
   async unlock(login, armored, passphrase) {
+    const attempt = {};
+    unlockAttempts.set(login, attempt);
     const key = await openpgp.readPrivateKey({ armoredKey: armored }).catch(() => {
       throw new Error('That isn’t a PGP private key');
     });
@@ -86,13 +89,19 @@ const api = {
     const open = await openpgp.decryptKey({ privateKey: key, passphrase }).catch(() => {
       throw new Error('That passphrase didn’t work');
     });
+    if (unlockAttempts.get(login) !== attempt) throw new Error('The PGP key was locked. Unlock it again.');
     unlocked.set(login, open);
     return describe(key);
   },
 
   lock(login) {
-    if (login) unlocked.delete(login);
-    else unlocked.clear();
+    if (login) {
+      unlocked.delete(login);
+      unlockAttempts.delete(login);
+    } else {
+      unlocked.clear();
+      unlockAttempts.clear();
+    }
     return true;
   },
 

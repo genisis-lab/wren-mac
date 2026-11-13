@@ -535,7 +535,7 @@ private struct EditUserSheet: View {
         .frame(width: 440)
         .onAppear {
             name = user.name
-            quota = user.customQuota == true ? user.quotaBytes.map { String(Int(($0 / 1_048_576).rounded())) } ?? "" : ""
+            quota = user.customQuota == true ? user.quotaBytes.flatMap { Int(exactly: ($0 / 1_048_576).rounded()) }.map(String.init) ?? "" : ""
             limit = user.customSendLimit == true ? user.sendLimitPerDay.map(String.init) ?? "" : ""
         }
     }

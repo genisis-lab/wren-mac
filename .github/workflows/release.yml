@@ -42,7 +42,21 @@ jobs:
           if [ "$REF_TYPE" = tag ]; then tag=$REF_NAME; fi
           echo "RELEASE_TAG=$tag" >> "$GITHUB_ENV"
       - name: Test the mail engine
-        run: swift test
+        run: |
+          python3 -c 'import http.server, threading'
+          swift test
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Test the bundled PGP engine
+        working-directory: pgp
+        run: |
+          npm ci --ignore-scripts
+          npm test
+          npm run build
+          git diff --exit-code -- ../Sources/Wren/Resources/pgp.js
+      - name: Test app security
+        run: scripts/test-app-security.sh
       - name: Generate project and build universal app
         run: |
           HOMEBREW_NO_AUTO_UPDATE=1 brew install xcodegen
