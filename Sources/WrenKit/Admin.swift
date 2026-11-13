@@ -194,7 +194,8 @@ public actor AdminClient {
 
     private func token() async throws -> String {
         guard let unlock, isUnlocked else {
-            await lock()
+            // An attempted admin call while a second step is pending must not cancel that challenge.
+            if self.unlock != nil { await lock() }
             throw AdminError.locked
         }
         return unlock.token

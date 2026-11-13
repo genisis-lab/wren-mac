@@ -76,6 +76,37 @@ final class RequestSecurityTests: XCTestCase {
         task.cancel()
     }
 
+    func testCSVKeepsCRLFInsideOneCellAndProtectsSpreadsheetFormulas() throws {
+        let multiline = "First\r\n=1+2"
+        XCTAssertEqual(CSV.parse(CSV.make([["name", "value"], [multiline, "safe"]])), [["name", "value"], [multiline, "safe"]])
+        for formula in ["=1+2", "+1+2", "-1+2", "@SUM(1)", "  =1+2", "\t=1+2", "＝1+2", "=1+2\";,=2+3"] {
+            let csv = CSV.make([[formula, "ordinary"]], protectingFormulas: true)
+            XCTAssertTrue(csv.hasPrefix("\"\t"))
+            XCTAssertEqual(CSV.parse(csv), [["\t" + formula, "ordinary"]])
+        }
+        let users = try JSONDecoder().decode([AdminUser].self, from: Data(#"[{"id":1,"email":"test@example.invalid","name":"=1+2","role":"user","status":"active"}]"#.utf8))
+        XCTAssertEqual(CSV.parse(AdminImport.export(users))[1][1], "\t=1+2")
+    }
+
+    func testSignedOutCacheCannotBeRecreatedByLateResponses() throws {
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let cache = MailCache(folder: folder)
+        let lateRequest = cache
+        cache.state = .init(accounts: [], mailboxes: [:], identities: [:])
+        XCTAssertTrue(FileManager.default.fileExists(atPath: folder.path))
+        cache.delete()
+        lateRequest.state = .init(accounts: [], mailboxes: [:], identities: [:])
+        lateRequest.saveList(.init(conversations: [], total: 0), account: "a", mailbox: "inbox")
+        lateRequest.saveThread([], id: "late")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: folder.path))
+        let freshSignIn = MailCache(folder: folder)
+        freshSignIn.saveThread([], id: "fresh")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: folder.path))
+        XCTAssertTrue(freshSignIn.thread("fresh") != nil)
+        XCTAssertTrue(lateRequest.thread("fresh") == nil)
+    }
+
     func testMalformedAdminCountsDoNotTrap() throws {
         let data = Data(#"{"version":"test","users":{"total":1e100,"active":3.5,"suspended":2}}"#.utf8)
         let overview = try JSONDecoder().decode(AdminOverview.self, from: data)

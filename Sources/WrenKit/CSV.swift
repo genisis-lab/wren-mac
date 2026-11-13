@@ -60,13 +60,18 @@ public enum CSV {
         return (headers, records)
     }
 
-    /// A file from rows: fields with commas, quotes or line breaks are quoted.
-    public static func make(_ rows: [[String]]) -> String {
+    /// A file from rows. Spreadsheet exports also mark formula-like fields as text, inside quotes.
+    /// The tab prefix follows OWASP's Excel guidance; it intentionally becomes part of exported data.
+    public static func make(_ rows: [[String]], protectingFormulas: Bool = false) -> String {
         rows.map { row in
-            row.map { v in v.contains(where: { $0 == "," || $0 == "\"" || $0 == "\n" || $0 == "\r" }) ? "\"\(v.replacingOccurrences(of: "\"", with: "\"\""))\"" : v }
-                .joined(separator: ",")
-        }
-        .joined(separator: "\r\n") + "\r\n"
+            row.map { original in
+                let first = original.trimmingCharacters(in: .whitespacesAndNewlines).first
+                let formula = protectingFormulas && first.map { "=+-@＝＋－＠".contains($0) } == true
+                let value = formula ? "\t" + original : original
+                let quote = formula || value.rangeOfCharacter(from: CharacterSet(charactersIn: ",\"\r\n")) != nil
+                return quote ? "\"\(value.replacingOccurrences(of: "\"", with: "\"\""))\"" : value
+            }.joined(separator: ",")
+        }.joined(separator: "\r\n") + "\r\n"
     }
 
     /// The first of several possible columns that has a value.
@@ -124,7 +129,8 @@ public enum AdminImport {
                         u.sendLimitPerDay.map(String.init) ?? "", String(u.aliases ?? 0), String(u.messages ?? 0),
                         u.totpEnabled == true ? "yes" : "no", u.recoveryEmail ?? "",
                     ]
-                }
+                },
+            protectingFormulas: true
         )
     }
 }

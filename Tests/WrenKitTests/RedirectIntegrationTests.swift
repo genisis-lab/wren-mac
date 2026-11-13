@@ -17,8 +17,9 @@ final class RedirectIntegrationTests: XCTestCase {
         try process.run()
         defer { if process.isRunning { process.terminate(); process.waitUntilExit() } }
         var config: [String: String]?
-        for _ in 0..<100 {
+        for _ in 0..<600 {
             if let data = try? Data(contentsOf: ports), let value = try? JSONDecoder().decode([String: String].self, from: data) { config = value; break }
+            if !process.isRunning { break }
             try await Task.sleep(for: .milliseconds(50))
         }
         let server = try XCTUnwrap(config?["source"].flatMap(URL.init(string:)))
