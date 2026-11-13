@@ -183,18 +183,27 @@ struct UndoSendBar: View {
     @Environment(MailStore.self) private var store
 
     var body: some View {
-        HStack(spacing: 8) {
-            Image(systemName: "paperplane")
-            // Counts down to when it goes.
-            Text(timerInterval: Date.now...max(Date.now, pending.until), countsDown: true)
-                .monospacedDigit()
-                .frame(width: 34, alignment: .leading)
-            Text(pending.draft.subject.isEmpty ? "Sending" : "Sending “\(pending.draft.subject)”")
-                .lineLimit(1)
-                .truncationMode(.middle)
-            Spacer(minLength: 4)
-            Button("Undo") { Task { await store.undoSend(pending) } }
-                .controlSize(.small)
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 8) {
+                Label("Sending", systemImage: "paperplane")
+                    .fixedSize()
+                Spacer(minLength: 4)
+                // Keep the countdown readable even at the sidebar's minimum width.
+                Text(timerInterval: Date.now...max(Date.now, pending.until), countsDown: true)
+                    .monospacedDigit()
+                    .frame(width: 34, alignment: .trailing)
+            }
+            HStack(spacing: 8) {
+                Text(pending.draft.subject.isEmpty ? "No Subject" : pending.draft.subject)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                    .help(pending.draft.subject.isEmpty ? "No Subject" : pending.draft.subject)
+                Spacer(minLength: 0)
+                Button("Undo") { Task { await store.undoSend(pending) } }
+                    .controlSize(.small)
+                    .fixedSize()
+            }
         }
         .font(.callout)
         .padding(10)
