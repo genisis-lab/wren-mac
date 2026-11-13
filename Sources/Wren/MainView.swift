@@ -68,6 +68,7 @@ struct MainView: View {
 
 struct Sidebar: View {
     @Environment(MailStore.self) private var store
+    @Environment(\.openWindow) private var openWindow
 
     var body: some View {
         @Bindable var store = store
@@ -109,7 +110,27 @@ struct Sidebar: View {
             VStack(spacing: 0) {
                 if let pending = store.pendingSend { UndoSendBar(pending: pending) }
                 notesView
+                adminButton
             }
+        }
+    }
+
+    /// For admins and helpdesk staff: the admin panel, which asks them to confirm it's them first.
+    @ViewBuilder
+    private var adminButton: some View {
+        if let admin = store.logins.first(where: { $0.adminRole != nil }) {
+            Button {
+                AdminPanel.shared.show(admin)
+                openWindow(id: "admin")
+            } label: {
+                Label(admin.adminRole == "helpdesk" ? "Helpdesk" : "Admin Panel", systemImage: "lock.shield")
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .buttonStyle(.borderless)
+            .font(.callout)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 8)
+            .help("Manage people, invitations and the mail queue (⌥⌘A). You confirm it’s you first.")
         }
     }
 

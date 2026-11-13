@@ -47,7 +47,8 @@ mail apps have to be turned on in Wren (Admin → Settings & policies → Securi
   are Wren's own settings, the same as in Settings on the web, so a change shows up in both
 - Settings → General: which account new mail is from when All Inboxes is showing, and whether new mail
   shows a notification and plays a sound. Settings → Viewing: the size of message text
-- The admin panel for Wren's administrators and helpdesk staff (Wren → Admin Panel…, ⌥⌘A): an overview,
+- The admin panel for Wren's administrators and helpdesk staff (Wren → Admin Panel…, ⌥⌘A, or the button at
+  the bottom of the sidebar): an overview,
   people (suspend, sign out, reset 2-step sign-in, reset and setup links, roles, sending, legal hold,
   delete), invitations, the outgoing mail queue and the activity log. Domains, providers and server
   settings stay in the admin panel on the web (Open on the Web)
