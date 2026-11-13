@@ -1,0 +1,47 @@
+{
+  "items": [
+    {
+      "id": 3,
+      "source": "smtp",
+      "provider_id": null,
+      "mail_from": "noreply-dmarc-support@google.com",
+      "rcpt_to": "postmaster@wren.test",
+      "subject": "Report Domain: wren.test",
+      "message_id": "mwehnsf5.4b42204db1430bcc7ef02587@google.com",
+      "size": 1129,
+      "status": "accepted",
+      "reason": "inbox",
+      "created_at": 1794544834736,
+      "provider_name": null
+    },
+    {
+      "id": 2,
+      "source": "cloudflare-routing",
+      "provider_id": null,
+      "mail_from": "carol@example.org",
+      "rcpt_to": "ghost@wren.test",
+      "subject": "Hello?",
+      "message_id": "mwehnsf0.e80adb6036074714d28f6b60@example.org",
+      "size": 273,
+      "status": "accepted",
+      "reason": "inbox",
+      "created_at": 1794544834720,
+      "provider_name": null
+    },
+    {
+      "id": 1,
+      "source": "cloudflare-routing",
+      "provider_id": null,
+      "mail_from": "carol@example.org",
+      "rcpt_to": "admin@wren.test",
+      "subject": "Hello",
+      "message_id": "mwehnsek.26c48decb3998c09818b82ee@example.org",
+      "size": 272,
+      "status": "accepted",
+      "reason": "inbox",
+      "created_at": 1794544834716,
+      "provider_name": null
+    }
+  ],
+  "nextBefore": null
+}

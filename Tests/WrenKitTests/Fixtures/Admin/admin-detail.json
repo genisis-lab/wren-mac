@@ -1,0 +1,109 @@
+{
+  "user": {
+    "id": 1,
+    "email": "admin@wren.test",
+    "name": "Ada Admin",
+    "role": "owner",
+    "status": "active",
+    "createdAt": 1794544834408,
+    "lastLoginAt": 1794544834476,
+    "passwordChangedAt": 1794544834408,
+    "mustChangePassword": false,
+    "totpEnabled": false,
+    "passkeys": 0,
+    "recoveryEmail": null,
+    "recoveryVerified": false,
+    "usedBytes": 2302,
+    "quotaBytes": 10737418240,
+    "customQuota": false,
+    "sendLimitPerDay": 500,
+    "customSendLimit": false,
+    "sentToday": 1,
+    "lockedUntil": null,
+    "legalHold": null,
+    "sendPausedAt": null,
+    "sendPausedReason": null
+  },
+  "mailHandling": {
+    "vacation": {
+      "enabled": false,
+      "subject": "",
+      "message": "",
+      "startAt": null,
+      "endAt": null,
+      "contactsOnly": false
+    },
+    "forwarding": {
+      "enabled": false,
+      "to": "",
+      "keep": "inbox"
+    }
+  },
+  "mailApps": {
+    "enabled": false,
+    "allowed": true,
+    "passwords": []
+  },
+  "exports": [],
+  "storage": {
+    "folders": [
+      {
+        "folder": "inbox",
+        "c": 4,
+        "bytes": 2302
+      }
+    ],
+    "attachments": {
+      "c": 1,
+      "bytes": 344
+    }
+  },
+  "addresses": [
+    {
+      "id": 3,
+      "address": "hello@wren.test",
+      "kind": "alias",
+      "enabled": 1,
+      "can_send": 1,
+      "created_by": null
+    },
+    {
+      "id": 1,
+      "address": "admin@wren.test",
+      "kind": "mailbox",
+      "enabled": 1,
+      "can_send": 1,
+      "created_by": null
+    }
+  ],
+  "shared": [],
+  "sessions": [
+    {
+      "id": "a611e5b5827a946f",
+      "ip": "",
+      "userAgent": "",
+      "createdAt": 1794544834476,
+      "lastSeenAt": 1794544834476
+    },
+    {
+      "id": "000f8087f2f0cf1f",
+      "ip": "",
+      "userAgent": "",
+      "createdAt": 1794544834412,
+      "lastSeenAt": 1794544834412
+    }
+  ],
+  "signIns": [
+    {
+      "id": 1,
+      "ok": true,
+      "method": "password",
+      "reason": null,
+      "ip": null,
+      "country": null,
+      "userAgent": null,
+      "newLocation": false,
+      "at": 1794544834476
+    }
+  ]
+}

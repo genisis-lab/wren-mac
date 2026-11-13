@@ -1,0 +1,10 @@
+{
+  "domain": "example.test",
+  "provider": {
+    "id": 1,
+    "name": "Resend",
+    "type": "resend"
+  },
+  "verified": null,
+  "detail": "Couldn’t ask Resend which domains are verified (the API key may only be allowed to send). Make sure example.test is verified there too."
+}

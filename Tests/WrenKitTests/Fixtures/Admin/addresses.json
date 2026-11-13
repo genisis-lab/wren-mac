@@ -1,0 +1,40 @@
+{
+  "addresses": [
+    {
+      "id": 3,
+      "address": "hello@wren.test",
+      "domain": "wren.test",
+      "kind": "alias",
+      "name": "Hello",
+      "userId": 1,
+      "userEmail": "admin@wren.test",
+      "canSend": true,
+      "enabled": true,
+      "description": "Front door",
+      "members": [],
+      "createdAt": 1794544834574
+    },
+    {
+      "id": 4,
+      "address": "team@wren.test",
+      "domain": "wren.test",
+      "kind": "group",
+      "name": "Team",
+      "userId": null,
+      "userEmail": null,
+      "canSend": true,
+      "enabled": true,
+      "description": "",
+      "members": [
+        {
+          "userId": 2,
+          "email": "sam@wren.test"
+        },
+        {
+          "external": "partner@gmail.com"
+        }
+      ],
+      "createdAt": 1794544834575
+    }
+  ]
+}

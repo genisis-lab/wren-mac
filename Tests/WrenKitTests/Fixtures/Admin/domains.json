@@ -1,0 +1,76 @@
+{
+  "domains": [
+    {
+      "id": 2,
+      "name": "example.test",
+      "enabled": true,
+      "verified": false,
+      "verifiedAt": null,
+      "verifyToken": "test-verify-token",
+      "providerId": 1,
+      "providerName": "Resend",
+      "fallbackProviderId": null,
+      "catchAllUserId": null,
+      "catchAllEmail": null,
+      "dkimSelector": "resend",
+      "footerText": "Sent from Example",
+      "mailboxes": 0,
+      "aliases": 0,
+      "dnsCheckedAt": 1794544834562,
+      "dns": {
+        "checkedAt": 1794544834562,
+        "verification": {
+          "ok": false,
+          "expected": "wren-verify=test-verify-token",
+          "found": []
+        },
+        "mx": {
+          "ok": false,
+          "records": [],
+          "hint": "No MX records: this domain cannot receive mail yet. Enable Cloudflare Email Routing for it."
+        },
+        "spf": {
+          "ok": false,
+          "record": null,
+          "includesProvider": null,
+          "expectedInclude": "amazonses.com",
+          "host": "send.example.test"
+        },
+        "dkim": [
+          {
+            "selector": "resend",
+            "found": false,
+            "value": null
+          }
+        ],
+        "dmarc": {
+          "ok": false,
+          "record": null,
+          "policy": null
+        },
+        "errors": []
+      },
+      "createdAt": 1794544834562
+    },
+    {
+      "id": 1,
+      "name": "wren.test",
+      "enabled": true,
+      "verified": true,
+      "verifiedAt": 1794544834707,
+      "verifyToken": "test-verify-token",
+      "providerId": null,
+      "providerName": null,
+      "fallbackProviderId": null,
+      "catchAllUserId": 1,
+      "catchAllEmail": "admin@wren.test",
+      "dkimSelector": null,
+      "footerText": "",
+      "mailboxes": 3,
+      "aliases": 2,
+      "dnsCheckedAt": null,
+      "dns": null,
+      "createdAt": 1794544834344
+    }
+  ]
+}

@@ -1,0 +1,15 @@
+{
+  "results": [
+    {
+      "row": 1,
+      "email": "jane@wren.test",
+      "ok": true
+    },
+    {
+      "row": 2,
+      "email": "bad",
+      "ok": false,
+      "error": "invalid email address"
+    }
+  ]
+}

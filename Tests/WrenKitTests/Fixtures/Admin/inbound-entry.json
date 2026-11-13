@@ -1,0 +1,23 @@
+{
+  "entry": {
+    "id": 3,
+    "source": "smtp",
+    "provider_id": null,
+    "mail_from": "noreply-dmarc-support@google.com",
+    "rcpt_to": "postmaster@wren.test",
+    "subject": "Report Domain: wren.test",
+    "message_id": "mwehnsf5.4b42204db1430bcc7ef02587@google.com",
+    "size": 1129,
+    "status": "accepted",
+    "reason": "inbox",
+    "created_at": 1794544834736,
+    "provider_name": null
+  },
+  "delivered": {
+    "folder": "inbox",
+    "mailbox": "admin@wren.test",
+    "spamScore": null,
+    "authResults": null
+  },
+  "headers": "Message-ID: <mwehnsf5.4b42204db1430bcc7ef02587@google.com>\r\nDate: Fri, 13 Nov 2026 04:40:34 +0000\r\nFrom: noreply-dmarc-support@google.com\r\nTo: postmaster@wren.test\r\nSubject: Report Domain: wren.test\r\nMIME-Version: 1.0\r\nContent-Type: multipart/mixed; boundary=\"----=_Part_9831b4f31abda7a64c909ffd\""
+}

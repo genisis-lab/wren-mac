@@ -1,0 +1,20 @@
+{
+  "domains": [
+    "example.test",
+    "wren.test"
+  ],
+  "users": [
+    {
+      "id": 1,
+      "email": "admin@wren.test"
+    },
+    {
+      "id": 2,
+      "email": "sam@wren.test"
+    },
+    {
+      "id": 3,
+      "email": "support@wren.test"
+    }
+  ]
+}

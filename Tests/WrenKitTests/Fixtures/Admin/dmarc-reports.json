@@ -1,0 +1,20 @@
+{
+  "items": [
+    {
+      "id": 1,
+      "org": "google.com",
+      "email": "x@google.com",
+      "reportId": "g-1",
+      "domain": "wren.test",
+      "policy": "quarantine",
+      "pct": null,
+      "begin": 1794372034000,
+      "end": 1794458434000,
+      "messages": 46,
+      "passed": 40,
+      "passRate": 87,
+      "receivedAt": 1794544834734
+    }
+  ],
+  "nextBefore": null
+}

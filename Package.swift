@@ -9,6 +9,7 @@ let package = Package(
     products: [.library(name: "WrenKit", targets: ["WrenKit"])],
     targets: [
         .target(name: "WrenKit"),
-        .testTarget(name: "WrenKitTests", dependencies: ["WrenKit"]),
+        // Fixtures/Admin: what Wren's admin API answers, dumped from the server's own test harness.
+        .testTarget(name: "WrenKitTests", dependencies: ["WrenKit"], resources: [.copy("Fixtures")]),
     ]
 )

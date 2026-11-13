@@ -1,0 +1,53 @@
+{
+  "entry": {
+    "id": 2,
+    "message_id": null,
+    "user_id": 1,
+    "provider_id": null,
+    "event": "failed",
+    "recipients": "bob@elsewhere.example",
+    "detail": "550 no such user",
+    "created_at": 1794544834700,
+    "outbox_id": 1,
+    "provider_name": null,
+    "user_email": "admin@wren.test"
+  },
+  "job": {
+    "id": 1,
+    "kind": "user",
+    "status": "failed",
+    "mailFrom": "admin@wren.test",
+    "recipients": [
+      "bob@elsewhere.example"
+    ],
+    "subject": "Quarterly numbers",
+    "attempts": 3,
+    "nextAttemptAt": 1794544834700,
+    "lastError": "550 no such user",
+    "providerName": null,
+    "providerMessageId": null,
+    "createdAt": 1794544834700,
+    "updatedAt": 1794544834700,
+    "canRetry": true,
+    "canCancel": false
+  },
+  "timeline": [
+    {
+      "id": 1,
+      "event": "deferred",
+      "recipients": "bob@elsewhere.example",
+      "detail": "try later",
+      "created_at": 1794544834700,
+      "provider_name": null
+    },
+    {
+      "id": 2,
+      "event": "failed",
+      "recipients": "bob@elsewhere.example",
+      "detail": "550 no such user",
+      "created_at": 1794544834700,
+      "provider_name": null
+    }
+  ],
+  "headers": "Message-ID: <mwehnsei.fe324aa9f61fa14ed8f927c8@wren.test>\r\nDate: Fri, 13 Nov 2026 04:40:34 +0000\r\nFrom: admin@wren.test\r\nTo: bob@elsewhere.example\r\nSubject: Quarterly numbers\r\nMIME-Version: 1.0\r\nContent-Type: multipart/alternative;\r\n boundary=\"----=_Part_807d084fda4c910fb2bfcbf7\""
+}

@@ -1,0 +1,17 @@
+{
+  "open": [
+    {
+      "id": 3,
+      "kind": "provider",
+      "key": "provider:1",
+      "severity": "critical",
+      "title": "Resend is failing",
+      "detail": "The last 5 messages through Resend failed: 401 invalid API key.",
+      "link": "/admin/providers",
+      "createdAt": 1794544834000,
+      "updatedAt": 1794548434000,
+      "resolvedAt": null
+    }
+  ],
+  "recent": []
+}

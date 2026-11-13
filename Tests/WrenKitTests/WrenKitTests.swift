@@ -707,9 +707,14 @@ final class Mock: URLProtocol {
     struct Reply: ExpressibleByDictionaryLiteral {
         var status = 200
         var json: JSON
-        init(status: Int, json: JSON) {
+        /// A body that isn't JSON (a file to download), sent instead of `json`.
+        var raw: Data?
+        var headers: [String: String] = [:]
+        init(status: Int, json: JSON, raw: Data? = nil, headers: [String: String] = [:]) {
             self.status = status
             self.json = json
+            self.raw = raw
+            self.headers = headers
         }
         init(dictionaryLiteral elements: (String, JSON)...) {
             json = .object(Dictionary(elements, uniquingKeysWith: { $1 }))
@@ -746,9 +751,10 @@ final class Mock: URLProtocol {
     override func startLoading() {
         do {
             let reply = try Mock.handler(request)
-            let response = HTTPURLResponse(url: request.url!, statusCode: reply.status, httpVersion: nil, headerFields: ["Content-Type": "application/json"])!
+            let headers = ["Content-Type": reply.raw == nil ? "application/json" : "application/octet-stream"].merging(reply.headers) { $1 }
+            let response = HTTPURLResponse(url: request.url!, statusCode: reply.status, httpVersion: nil, headerFields: headers)!
             client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
-            client?.urlProtocol(self, didLoad: try JSONEncoder().encode(reply.json))
+            client?.urlProtocol(self, didLoad: try reply.raw ?? JSONEncoder().encode(reply.json))
             client?.urlProtocolDidFinishLoading(self)
         } catch {
             client?.urlProtocol(self, didFailWithError: error)

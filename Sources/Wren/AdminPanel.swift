@@ -20,7 +20,7 @@ final class AdminPanel {
     }
 
     enum Section: String, CaseIterable, Identifiable {
-        case overview, users, invites, queue, activity
+        case overview, users, invites, domains, addresses, providers, dmarc, queue, logs, settings, activity, system
         var id: String { rawValue }
 
         var title: String {
@@ -28,8 +28,15 @@ final class AdminPanel {
             case .overview: "Overview"
             case .users: "Users"
             case .invites: "Invitations"
+            case .domains: "Domains"
+            case .addresses: "Aliases & Groups"
+            case .providers: "Providers"
+            case .dmarc: "DMARC Reports"
             case .queue: "Mail Queue"
-            case .activity: "Activity"
+            case .logs: "Delivery Logs"
+            case .settings: "Settings & Policies"
+            case .activity: "Audit Log"
+            case .system: "System & Backup"
             }
         }
 
@@ -38,11 +45,33 @@ final class AdminPanel {
             case .overview: "gauge.with.dots.needle.33percent"
             case .users: "person.2"
             case .invites: "envelope.open"
+            case .domains: "globe"
+            case .addresses: "at"
+            case .providers: "powerplug"
+            case .dmarc: "checkmark.shield"
             case .queue: "tray.and.arrow.up"
+            case .logs: "list.bullet.rectangle.portrait"
+            case .settings: "slider.horizontal.3"
             case .activity: "list.bullet.rectangle"
+            case .system: "externaldrive"
             }
         }
     }
+
+    struct Group: Identifiable {
+        let title: String
+        let sections: [Section]
+        var id: String { title }
+    }
+
+    /// The sidebar's groups, as in the web admin panel.
+    static let groups = [
+        Group(title: "", sections: [.overview]),
+        Group(title: "People", sections: [.users, .invites]),
+        Group(title: "Mail", sections: [.domains, .addresses, .providers, .dmarc]),
+        Group(title: "Delivery", sections: [.queue, .logs]),
+        Group(title: "Server", sections: [.settings, .activity, .system]),
+    ]
 
     var loginId: String?
     var stage = Stage.password
@@ -51,7 +80,7 @@ final class AdminPanel {
     var error: String?
     /// Something that worked and has a link to hand on (a setup link, an invitation).
     var notice: (text: String, link: String?)?
-    var section = Section.users
+    var section = Section.overview
     var locksAt: Date?
     /// Where an emailed code went, once one was sent.
     var emailSentTo: String?
@@ -60,11 +89,15 @@ final class AdminPanel {
     var users: [AdminUser] = []
     var search = ""
     var selectedUser: Int?
+    /// The people picked in the list: one shows their page, several can be changed together.
+    var picked: Set<Int> = []
     var detail: AdminUserDetail?
     var invites: [AdminInvite] = []
-    var queue: [AdminQueued] = []
-    var queueStatus = ""
-    var activity: [AdminAuditEntry] = []
+    /// Goes up after each change and on Reload: pages that load their own data reload when it does.
+    var generation = 0
+    /// What a page should open at, when another page sends you there (an alert, the setup checklist).
+    var selectedDomain: Int?
+    var settingsTab = AdminSettingsTab.general
 
     @ObservationIgnored private var waiting: Task<Void, Never>?
     @ObservationIgnored private var idleLock: Task<Void, Never>?
@@ -93,6 +126,11 @@ final class AdminPanel {
     var login: Login? { logins.first { $0.id == loginId } ?? logins.first }
 
     var isHelpdesk: Bool { role == "helpdesk" }
+
+    var isOwner: Bool { role == "owner" }
+
+    /// The person signed in here (the panel's own account).
+    func isMe(_ email: String) -> Bool { login?.username.lowercased() == email.lowercased() }
 
     /// Helpdesk staff do account support only: people and invitations.
     var sections: [Section] { isHelpdesk ? [.users, .invites] : Section.allCases }
@@ -225,9 +263,11 @@ final class AdminPanel {
         users = []
         detail = nil
         selectedUser = nil
+        picked = []
+        selectedDomain = nil
         invites = []
-        queue = []
-        activity = []
+        // Pages forget what they loaded.
+        generation += 1
     }
 
     /// Run an unlock step or an admin call: one at a time, with its error shown. Locks when the server says the unlock ended.
@@ -274,10 +314,8 @@ final class AdminPanel {
             case .overview: overview = try await admin.get("/overview")
             case .users: try await loadUsers()
             case .invites: invites = try await admin.get("/invites", as: Invites.self).invites
-            case .queue:
-                let query = queueStatus.isEmpty ? "" : "?status=\(queueStatus)"
-                queue = try await admin.get("/outbox\(query)", as: Queue.self).items
-            case .activity: activity = try await admin.get("/audit", as: Audit.self).items
+            // The other pages load their own.
+            default: break
             }
             error = nil
         } catch AdminError.locked {
@@ -293,11 +331,20 @@ final class AdminPanel {
         let q = search.trimmingCharacters(in: .whitespaces)
         let query = q.isEmpty ? "" : "?q=\(q.addingPercentEncoding(withAllowedCharacters: .alphanumerics) ?? "")"
         users = try await login.admin.get("/users\(query)", as: Users.self).users
+        // People deleted meanwhile drop out of what's picked.
+        picked.formIntersection(users.map(\.id))
         if let selectedUser { try await loadDetail(selectedUser) }
+    }
+
+    /// Pick people in the list.
+    func pick(_ ids: Set<Int>) {
+        picked = ids
+        if ids.count == 1 { select(user: ids.first) } else { selectedUser = nil; detail = nil }
     }
 
     func select(user id: Int?) {
         selectedUser = id
+        picked = id.map { [$0] } ?? []
         detail = nil
         guard let id, let login else { return }
         let admin = login.admin
@@ -311,6 +358,12 @@ final class AdminPanel {
 
     // MARK: Changes
 
+    /// Load everything again: this page's data and every page that loads its own.
+    func reload() {
+        generation += 1
+        Task { await load() }
+    }
+
     /// A change, then the page loads again. `done` says what happened, when that's worth saying.
     func change(_ method: String, _ path: String, _ body: JSON? = nil, done: ((JSON) -> (text: String, link: String?)?)? = nil) {
         guard let login else { return }
@@ -318,31 +371,116 @@ final class AdminPanel {
         run {
             let reply = try await admin.send(method, path, body)
             if let note = done?(reply) { self.notice = note }
+            self.generation += 1
             await self.load()
         }
     }
 
-    func deleteUser(_ id: Int) {
+    /// A change from a sheet, which shows its own errors: answers the reply, or throws. Pages reload after it,
+    /// unless `reload` is false (after a restore, which ends the unlock: the page says so first).
+    @discardableResult
+    func send(_ method: String, _ path: String, _ body: JSON? = nil, reload: Bool = true) async throws -> JSON {
+        guard let login else { throw AdminError.locked }
+        do {
+            let reply = try await login.admin.send(method, path, body)
+            if reload { generation += 1 }
+            await noteActivity()
+            return reply
+        } catch AdminError.locked {
+            lockedOut(message: AdminError.locked.errorDescription)
+            throw AdminError.locked
+        }
+    }
+
+    /// Something for a page to show: nil when it couldn't be loaded (the error shows above the page).
+    func fetch<T: Decodable>(_ path: String, as type: T.Type = T.self) async -> T? {
+        guard let login, stage == .unlocked else { return nil }
+        do {
+            let value = try await login.admin.get(path, as: T.self)
+            await noteActivity()
+            return value
+        } catch AdminError.locked {
+            lockedOut(message: AdminError.locked.errorDescription)
+        } catch is CancellationError {
+        } catch let error as URLError where error.code == .cancelled {
+        } catch {
+            self.error = error.localizedDescription
+        }
+        return nil
+    }
+
+    func deleteUser(_ id: Int, transferTo: Int? = nil) {
         guard let login else { return }
         let admin = login.admin
         run {
-            try await admin.send("DELETE", "/users/\(id)")
+            try await admin.send("DELETE", "/users/\(id)\(transferTo.map { "?transferTo=\($0)" } ?? "")")
             self.selectedUser = nil
+            self.picked = []
             self.detail = nil
+            self.generation += 1
             await self.load()
         }
     }
 
-    /// The web admin panel, for what this one doesn't do (domains, providers, settings, backups).
-    func openOnWeb() {
-        guard let login, let url = URL(string: "admin", relativeTo: login.client.server) else { return }
+    /// Save a download (an export, a backup): asks where first, then downloads straight to that file.
+    func download(_ path: String, suggested name: String) {
+        guard let login else { return }
+        let save = NSSavePanel()
+        save.nameFieldStringValue = name
+        save.canCreateDirectories = true
+        guard save.runModal() == .OK, let target = save.url else { return }
+        let admin = login.admin
+        run {
+            let (file, _) = try await admin.download(path)
+            try? FileManager.default.removeItem(at: target)
+            try FileManager.default.moveItem(at: file, to: target)
+            self.notice = (text: "Saved \(target.lastPathComponent).", link: nil)
+        }
+    }
+
+    /// Send a file you choose as the request body (an export to restore). Answers the reply, or throws.
+    func upload(_ path: String, file: URL, contentType: String, reload: Bool = true) async throws -> JSON {
+        guard let login else { throw AdminError.locked }
+        do {
+            let reply = try await login.admin.upload(path, file: file, contentType: contentType)
+            if reload { generation += 1 }
+            return reply
+        } catch AdminError.locked {
+            lockedOut(message: AdminError.locked.errorDescription)
+            throw AdminError.locked
+        }
+    }
+
+    /// A link from the server (an alert's "Fix", a setup step): the page here that fixes it, else the web app.
+    func open(link: String) {
+        let parts = link.split(separator: "/").map(String.init)
+        guard parts.first == "admin" else { return openOnWeb(link) }
+        switch parts.dropFirst().first {
+        case "users": section = .users; if let id = parts.dropFirst(2).first.flatMap(Int.init) { select(user: id) }
+        case "domains": section = .domains; selectedDomain = parts.dropFirst(2).first.flatMap(Int.init)
+        case "dmarc": section = .dmarc
+        case "addresses": section = .addresses
+        case "providers": section = .providers
+        case "queue": section = .queue
+        case "logs": section = .logs
+        case "invites": section = .invites
+        case "audit": section = .activity
+        case "system": section = .system
+        case "settings":
+            section = .settings
+            if let tab = parts.dropFirst(2).first.flatMap(AdminSettingsTab.init(rawValue:)) { settingsTab = tab }
+        default: section = .overview
+        }
+    }
+
+    /// A page of Wren on the web (your own settings, which the Mac doesn't do).
+    func openOnWeb(_ path: String) {
+        guard let login, let url = URL(string: path.hasPrefix("/") ? String(path.dropFirst()) : path, relativeTo: login.client.server) else { return }
         NSWorkspace.shared.open(url)
     }
 
     private struct Users: Decodable { var users: [AdminUser] }
     private struct Invites: Decodable { var invites: [AdminInvite] }
-    private struct Queue: Decodable { var items: [AdminQueued] }
-    private struct Audit: Decodable { var items: [AdminAuditEntry] }
 }
 
 // MARK: - Window
@@ -539,24 +677,40 @@ struct AdminUnlocked: View {
 
     var body: some View {
         NavigationSplitView {
-            List(panel.sections, selection: Binding(get: { panel.section }, set: { if let s = $0 { panel.section = s } })) { section in
-                Label(section.title, systemImage: section.icon).tag(section)
+            List(selection: Binding(get: { panel.section }, set: { if let s = $0 { panel.section = s } })) {
+                ForEach(AdminPanel.groups) { group in
+                    let shown = group.sections.filter(panel.sections.contains)
+                    if group.title.isEmpty {
+                        ForEach(shown) { SidebarRow(section: $0).tag($0) }
+                    } else if !shown.isEmpty {
+                        Section(group.title) {
+                            ForEach(shown) { SidebarRow(section: $0).tag($0) }
+                        }
+                    }
+                }
             }
-            .navigationSplitViewColumnWidth(min: 170, ideal: 190)
+            .navigationSplitViewColumnWidth(min: 180, ideal: 200)
         } detail: {
             VStack(spacing: 0) {
                 if let notice = panel.notice { NoticeBar(notice: notice) { panel.notice = nil } }
                 if let error = panel.error {
-                    Label(error, systemImage: "exclamationmark.triangle.fill")
-                        .foregroundStyle(.red)
-                        .padding(8)
-                        .frame(maxWidth: .infinity, alignment: .leading)
+                    HStack {
+                        Label(error, systemImage: "exclamationmark.triangle.fill")
+                            .foregroundStyle(.red)
+                            .fixedSize(horizontal: false, vertical: true)
+                        Spacer()
+                        Button { panel.error = nil } label: { Image(systemName: "xmark") }
+                            .buttonStyle(.borderless)
+                            .accessibilityLabel("Close")
+                    }
+                    .padding(8)
                 }
                 page
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
         .task(id: panel.section) { await panel.load() }
+        .onChange(of: panel.section) { panel.error = nil }
         .toolbar {
             ToolbarItemGroup {
                 if let at = panel.locksAt {
@@ -565,11 +719,8 @@ struct AdminUnlocked: View {
                         .foregroundStyle(.secondary)
                         .help("The admin panel locks after 15 minutes without use, and an hour after unlocking.")
                 }
-                Button { Task { await panel.load() } } label: { Label("Reload", systemImage: "arrow.clockwise") }
-                if !panel.isHelpdesk {
-                    Button { panel.openOnWeb() } label: { Label("Open on the Web", systemImage: "safari") }
-                        .help("Domains, providers, settings and backups are in the admin panel on the web.")
-                }
+                Button { panel.reload() } label: { Label("Reload", systemImage: "arrow.clockwise") }
+                    .keyboardShortcut("r", modifiers: .command)
                 Button { panel.lock() } label: { Label("Lock", systemImage: "lock") }
                     .keyboardShortcut("l", modifiers: [.command, .control])
             }
@@ -582,9 +733,24 @@ struct AdminUnlocked: View {
         case .overview: AdminOverviewPage(panel: panel)
         case .users: AdminUsersPage(panel: panel)
         case .invites: AdminInvitesPage(panel: panel)
+        case .domains: AdminDomainsPage(panel: panel)
+        case .addresses: AdminAddressesPage(panel: panel)
+        case .providers: AdminProvidersPage(panel: panel)
+        case .dmarc: AdminDmarcPage(panel: panel)
         case .queue: AdminQueuePage(panel: panel)
+        case .logs: AdminLogsPage(panel: panel)
+        case .settings: AdminSettingsPage(panel: panel)
         case .activity: AdminActivityPage(panel: panel)
+        case .system: AdminSystemPage(panel: panel)
         }
+    }
+}
+
+private struct SidebarRow: View {
+    let section: AdminPanel.Section
+
+    var body: some View {
+        Label(section.title, systemImage: section.icon)
     }
 }
 
@@ -597,7 +763,7 @@ private struct NoticeBar: View {
         HStack(spacing: 10) {
             Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
             VStack(alignment: .leading, spacing: 4) {
-                Text(notice.text)
+                Text(notice.text).fixedSize(horizontal: false, vertical: true)
                 if let link = notice.link {
                     Text(link)
                         .font(.system(.caption, design: .monospaced))
@@ -607,12 +773,7 @@ private struct NoticeBar: View {
                 }
             }
             Spacer()
-            if let link = notice.link {
-                Button("Copy Link") {
-                    NSPasteboard.general.clearContents()
-                    NSPasteboard.general.setString(link, forType: .string)
-                }
-            }
+            if let link = notice.link { CopyButton(value: link, title: "Copy Link") }
             Button { close() } label: { Image(systemName: "xmark") }
                 .buttonStyle(.borderless)
                 .accessibilityLabel("Close")
@@ -622,661 +783,191 @@ private struct NoticeBar: View {
     }
 }
 
+// MARK: Shared pieces
+
 /// Dates in Wren's admin API are milliseconds.
 func adminDate(_ ms: Double?) -> String {
     guard let date = wrenDate(ms) else { return "—" }
     return date.formatted(date: .abbreviated, time: .shortened)
 }
 
+/// "3 hours ago".
+func adminAgo(_ ms: Double?) -> String {
+    guard let date = wrenDate(ms) else { return "—" }
+    return date.formatted(.relative(presentation: .named))
+}
+
 func adminBytes(_ n: Double?) -> String {
     ByteCountFormatter.string(fromByteCount: Int64(n ?? 0), countStyle: .file)
 }
 
-// MARK: Overview
+/// "87%", or a dash when there's nothing to count.
+func adminPercent(_ n: Double?) -> String {
+    n.map { "\(Int($0.rounded()))%" } ?? "—"
+}
 
-struct AdminOverviewPage: View {
-    @Bindable var panel: AdminPanel
+/// Copies a value to the clipboard.
+struct CopyButton: View {
+    let value: String
+    var title = "Copy"
 
     var body: some View {
-        if let o = panel.overview {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 18) {
-                    ForEach(o.warnings, id: \.self) { w in
-                        Label(w.message, systemImage: w.level == "warn" ? "exclamationmark.triangle.fill" : "info.circle")
-                            .foregroundStyle(w.level == "warn" ? Color.orange : Color.secondary)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 170), spacing: 12)], spacing: 12) {
-                        tile("People", "\(o.users)", "\(o.activeUsers) active, \(o.suspendedUsers) suspended")
-                        tile("Domains", "\(o.domains)", "\(o.verifiedDomains) verified")
-                        tile("Received today", "\(o.received24h)", "\(o.spam24h) spam, \(o.rejected24h) rejected")
-                        tile("Sent today", "\(o.sent24h)", "\(o.failed24h) failed")
-                        tile("Waiting to send", "\(o.queued + o.sending)", o.sending > 0 ? "\(o.sending) sending now" : "In the queue")
-                        tile("Failed sign-ins", "\(o.failedSignIns24h)", "Last 24 hours; \(o.newLocationSignIns7d) from new places this week")
-                    }
-                    if !o.flagged.isEmpty {
-                        Text("Sign-ins to look at").font(.headline)
-                        ForEach(o.flagged, id: \.self) { f in
-                            Button {
-                                panel.section = .users
-                                panel.select(user: f.id)
-                            } label: {
-                                HStack {
-                                    Text(f.email)
-                                    Spacer()
-                                    if let n = f.failed, n > 0 { Text("\(n) failed").foregroundStyle(.red) }
-                                    if let n = f.newLocation, n > 0 { Text("\(n) new place\(n == 1 ? "" : "s")").foregroundStyle(.orange) }
-                                }
-                            }
-                            .buttonStyle(.plain)
-                        }
-                    }
-                    Text("Wren \(o.version)").font(.caption).foregroundStyle(.secondary)
-                }
-                .padding(20)
-            }
-        } else {
-            ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
+        Button(title) {
+            NSPasteboard.general.clearContents()
+            NSPasteboard.general.setString(value, forType: .string)
         }
-    }
-
-    private func tile(_ title: String, _ value: String, _ sub: String) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text(title).font(.caption).foregroundStyle(.secondary)
-            Text(value).font(.system(size: 26, weight: .semibold, design: .rounded))
-            Text(sub).font(.caption).foregroundStyle(.secondary).lineLimit(2)
-        }
-        .padding(12)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 10))
-        .accessibilityElement(children: .combine)
     }
 }
 
-// MARK: Users
-
-struct AdminUsersPage: View {
-    @Bindable var panel: AdminPanel
-    @State private var creating = false
-
-    var body: some View {
-        HSplitView {
-            VStack(spacing: 0) {
-                HStack {
-                    TextField("Search", text: $panel.search)
-                        .textFieldStyle(.roundedBorder)
-                        .onSubmit { Task { await panel.load() } }
-                    Button { creating = true } label: { Image(systemName: "plus") }
-                        .help("New User")
-                        .accessibilityLabel("New User")
-                        .disabled(panel.isHelpdesk)
-                }
-                .padding(8)
-                List(panel.users, selection: Binding(get: { panel.selectedUser }, set: { panel.select(user: $0) })) { user in
-                    UserRow(user: user).tag(user.id)
-                }
-            }
-            .frame(minWidth: 240, idealWidth: 290, maxWidth: 380)
-            Group {
-                if let detail = panel.detail {
-                    AdminUserDetailView(panel: panel, detail: detail)
-                } else if panel.selectedUser != nil {
-                    ProgressView()
-                } else {
-                    ContentUnavailableView("No One Selected", systemImage: "person.crop.circle", description: Text("Choose someone to see their account."))
-                }
-            }
-            .frame(minWidth: 400, maxWidth: .infinity, maxHeight: .infinity)
-        }
-        .sheet(isPresented: $creating) { NewUserSheet(panel: panel) }
-    }
-}
-
-private struct UserRow: View {
-    let user: AdminUser
+/// A value to copy into another app (a DNS record, a webhook URL).
+struct CopyField: View {
+    let label: String
+    let value: String
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 2) {
+        LabeledContent(label) {
             HStack(spacing: 6) {
-                Text(user.name.isEmpty ? user.email : user.name).lineLimit(1)
-                if user.role != "user" { RoleBadge(role: user.role) }
-            }
-            HStack(spacing: 6) {
-                Text(user.email).font(.caption).foregroundStyle(.secondary).lineLimit(1)
-                if user.isSuspended { Text("Suspended").font(.caption).foregroundStyle(.red) }
-                if user.locked == true { Image(systemName: "lock.fill").font(.caption).foregroundStyle(.orange).accessibilityLabel("Locked out") }
-                if user.legalHold == true { Image(systemName: "building.columns").font(.caption).foregroundStyle(.secondary).accessibilityLabel("Legal hold") }
+                Text(value)
+                    .font(.system(.callout, design: .monospaced))
+                    .textSelection(.enabled)
+                    .lineLimit(2)
+                    .truncationMode(.middle)
+                    .multilineTextAlignment(.trailing)
+                CopyButton(value: value)
+                    .controlSize(.small)
+                    .accessibilityLabel("Copy \(label)")
             }
         }
-        .padding(.vertical, 2)
     }
 }
 
-private struct RoleBadge: View {
-    let role: String
+/// A coloured word: ok, warn, danger or plain.
+struct AdminBadge: View {
+    enum Tone { case ok, warn, danger, accent, plain }
+    let text: String
+    var tone = Tone.plain
 
     var body: some View {
-        Text(role.capitalized)
+        Text(text)
             .font(.caption2.weight(.medium))
             .padding(.horizontal, 6)
             .padding(.vertical, 1)
-            .background(.tint.opacity(0.15), in: Capsule())
+            .foregroundStyle(color)
+            .background(color.opacity(0.14), in: Capsule())
     }
-}
 
-/// A change to someone that needs a second look before it's made.
-private enum Confirm: Identifiable {
-    case suspend, signOut, reset2fa, delete, releaseHold, revokeSession(String), role(String)
-
-    var id: String {
-        switch self {
-        case .suspend: "suspend"
-        case .signOut: "signOut"
-        case .reset2fa: "reset2fa"
-        case .delete: "delete"
-        case .releaseHold: "releaseHold"
-        case .revokeSession(let id): "session \(id)"
-        case .role(let role): "role \(role)"
+    private var color: Color {
+        switch tone {
+        case .ok: .green
+        case .warn: .orange
+        case .danger: .red
+        case .accent: .accentColor
+        case .plain: .secondary
         }
     }
 
-    /// Taking something away; a new role only changes what they may do.
-    var isDestructive: Bool {
-        if case .role = self { return false }
-        return true
+    /// The tone the web uses for a delivery or inbound status.
+    static func tone(_ status: String) -> Tone {
+        switch status {
+        case "sent", "delivered", "accepted", "done", "ok": .ok
+        case "queued", "sending", "running": .accent
+        case "deferred", "spam", "delayed", "warn": .warn
+        case "failed", "rejected", "error", "bounced", "complained": .danger
+        default: .plain
+        }
     }
 }
 
-struct AdminUserDetailView: View {
-    @Bindable var panel: AdminPanel
-    let detail: AdminUserDetail
-    @State private var confirming: Confirm?
-    @State private var holdNote = ""
-    @State private var placingHold = false
-
-    private var u: AdminUserDetail.User { detail.user }
-    private var path: String { "/users/\(u.id)" }
+/// A ✓, ✕ or · for a check that passed, failed or wasn't made.
+struct CheckMark: View {
+    let ok: Bool?
+    var warnOnly = false
 
     var body: some View {
-        Form {
-            Section {
-                HStack {
-                    VStack(alignment: .leading) {
-                        Text(u.name).font(.title3.bold())
-                        Text(u.email).foregroundStyle(.secondary).textSelection(.enabled)
-                    }
-                    Spacer()
-                    if u.status == "suspended" { Text("Suspended").foregroundStyle(.red) }
-                }
-                if !panel.isHelpdesk {
-                    // Asks first: a role decides who can manage everyone's accounts.
-                    Picker("Role", selection: Binding(get: { u.role }, set: { role in if role != u.role { confirming = .role(role) } })) {
-                        Text("User").tag("user")
-                        Text("Helpdesk").tag("helpdesk")
-                        Text("Admin").tag("admin")
-                        if u.role == "owner" || panel.role == "owner" { Text("Owner").tag("owner") }
-                    }
-                } else {
-                    LabeledContent("Role", value: u.role.capitalized)
-                }
-                LabeledContent("Storage", value: "\(adminBytes(u.usedBytes)) of \(adminBytes(u.quotaBytes))")
-                LabeledContent("Last sign-in", value: adminDate(u.lastLoginAt))
-                LabeledContent("Created", value: adminDate(u.createdAt))
-            }
-            security
-            sending
-            if !panel.isHelpdesk { administration }
-            sessions
-            signIns
-        }
-        .formStyle(.grouped)
-        .confirmationDialog(title, isPresented: Binding(get: { confirming != nil }, set: { if !$0 { confirming = nil } }), presenting: confirming) { c in
-            Button(button(c), role: c.isDestructive ? .destructive : nil) { perform(c) }
-        } message: { c in
-            Text(message(c))
-        }
-        .sheet(isPresented: $placingHold) { holdSheet }
+        Image(systemName: ok == nil ? "circle" : ok! ? "checkmark.circle.fill" : warnOnly ? "exclamationmark.triangle.fill" : "xmark.circle.fill")
+            .foregroundStyle(ok == nil ? Color.secondary : ok! ? Color.green : warnOnly ? Color.orange : Color.red)
+            .accessibilityLabel(ok == nil ? "Not checked" : ok! ? "OK" : "Missing")
     }
+}
 
-    private var security: some View {
-        Section("Sign-in and security") {
-            LabeledContent("2-step sign-in", value: u.totpEnabled == true ? "On" : "Off")
-            LabeledContent("Passkeys", value: "\(u.passkeys ?? 0)")
-            LabeledContent("Recovery email", value: u.recoveryEmail.map { "\($0)\(u.recoveryVerified == true ? "" : " (not confirmed)")" } ?? "None")
-            if let until = u.lockedUntil {
-                LabeledContent("Locked out until", value: adminDate(until))
-                Button("Let Them Try Again Now") { panel.change("POST", "\(path)/unlock") }
+/// A sheet's buttons, and its error when the server refused.
+struct SheetButtons: View {
+    var error: String?
+    var busy = false
+    let action: String
+    var destructive = false
+    var disabled = false
+    let cancel: () -> Void
+    let perform: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            if let error {
+                Label(error, systemImage: "exclamationmark.triangle.fill")
+                    .foregroundStyle(.red)
+                    .fixedSize(horizontal: false, vertical: true)
             }
             HStack {
-                Button(u.status == "suspended" ? "Reactivate" : "Suspend…") {
-                    if u.status == "suspended" { panel.change("PUT", path, ["status": "active"]) } else { confirming = .suspend }
-                }
-                Button("Sign Out Everywhere…") { confirming = .signOut }
-                if u.totpEnabled == true { Button("Reset 2-Step…") { confirming = .reset2fa } }
-            }
-            HStack {
-                if u.recoveryEmail != nil {
-                    Button("Email a Password Reset Link") {
-                        panel.change("POST", "\(path)/reset-link") { r in (text: "A reset link went to \(r["sentTo"]?.string ?? "their recovery email").", link: nil) }
-                    }
-                }
-                Button("Make a Sign-In Link") {
-                    panel.change("POST", "\(path)/setup-link") { r in (text: "A one-time link to choose a new password. Give it to them privately.", link: r["url"]?.string) }
-                }
+                if busy { ProgressView().controlSize(.small) }
+                Spacer()
+                Button("Cancel", action: cancel)
+                    .keyboardShortcut(.cancelAction)
+                Button(action, role: destructive ? .destructive : nil, action: perform)
+                    .keyboardShortcut(.defaultAction)
+                    .disabled(disabled || busy)
             }
         }
     }
+}
 
-    private var sending: some View {
-        Section("Sending") {
-            if let paused = u.sendPausedAt {
-                LabeledContent("Sending paused", value: adminDate(paused))
-                if let reason = u.sendPausedReason { Text(reason).font(.caption).foregroundStyle(.secondary) }
-                if !panel.isHelpdesk { Button("Resume Sending") { panel.change("POST", "\(path)/resume-sending") } }
-            } else {
-                LabeledContent("Sent today", value: "\(u.sentToday ?? 0) of \(u.sendLimitPerDay.map { "\($0)" } ?? "no limit")")
-                if !panel.isHelpdesk { Button("Pause Sending") { panel.change("POST", "\(path)/pause-sending") } }
-            }
-        }
-    }
+/// A change that can't be undone: typing `phrase` (an address, a word) unlocks the button.
+struct TypedConfirmSheet: View {
+    let title: String
+    let message: String
+    let phrase: String
+    let action: String
+    let perform: () async throws -> Void
+    @Environment(\.dismiss) private var dismiss
+    @State private var typed = ""
+    @State private var busy = false
+    @State private var error: String?
 
-    private var administration: some View {
-        Section("Administration") {
-            if let apps = detail.mailApps {
-                Toggle("Mail apps", isOn: Binding(get: { apps.allowed }, set: { on in panel.change("PUT", path, ["mailApps": .bool(on)]) }))
-                    .disabled(!apps.enabled)
-                    .help(apps.enabled ? "Whether they can use mail apps such as this one." : "Mail apps are off for everyone (Settings → Security on the web).")
-            }
-            if let hold = u.legalHold {
-                LabeledContent("Legal hold since", value: adminDate(hold.since))
-                if let note = hold.note { Text(note).font(.caption).foregroundStyle(.secondary) }
-                Button("Release Legal Hold…") { confirming = .releaseHold }
-            } else {
-                Button("Place on Legal Hold…") { placingHold = true }
-            }
-            if u.role != "owner" {
-                Button("Delete Account…", role: .destructive) { confirming = .delete }
-            }
-        }
-    }
-
-    private var sessions: some View {
-        Section("Signed in on") {
-            if detail.sessions.isEmpty { Text("Nowhere right now").foregroundStyle(.secondary) }
-            ForEach(detail.sessions) { s in
-                HStack {
-                    VStack(alignment: .leading) {
-                        Text(s.userAgent.map(Self.device) ?? "Unknown device")
-                        Text("\(s.ip ?? "") · last seen \(adminDate(s.lastSeenAt))").font(.caption).foregroundStyle(.secondary)
-                    }
-                    Spacer()
-                    Button("Sign Out…") { confirming = .revokeSession(s.id) }
-                }
-            }
-        }
-    }
-
-    private var signIns: some View {
-        Section("Recent sign-ins") {
-            ForEach(detail.signIns.prefix(20)) { s in
-                HStack(alignment: .firstTextBaseline) {
-                    Image(systemName: s.ok ? "checkmark.circle" : "xmark.octagon")
-                        .foregroundStyle(s.ok ? Color.green : Color.red)
-                        .accessibilityLabel(s.ok ? "Succeeded" : "Failed")
-                    VStack(alignment: .leading) {
-                        Text(Self.method(s.method) + (s.reason.map { " · \(Self.reason($0))" } ?? ""))
-                        Text([adminDate(s.at), s.ip, s.country].compactMap { $0 }.joined(separator: " · "))
-                            .font(.caption).foregroundStyle(.secondary)
-                    }
-                    if s.newLocation == true { Text("New place").font(.caption).foregroundStyle(.orange) }
-                }
-            }
-        }
-    }
-
-    private var holdSheet: some View {
+    var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("Place \(u.email) on legal hold?").font(.headline)
-            Text("While it’s on, none of their mail is deleted for good (retention, Delete Forever, deleting the account). They aren’t told.")
+            Text(title).font(.headline)
+            Text(message)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
-            TextField("Note (case or reason)", text: $holdNote)
+            TextField("Type \(phrase) to confirm", text: $typed)
                 .textFieldStyle(.roundedBorder)
-            HStack {
-                Spacer()
-                Button("Cancel") { placingHold = false }
-                    .keyboardShortcut(.cancelAction)
-                Button("Place Hold") {
-                    panel.change("PUT", "\(path)/legal-hold", ["hold": true, "note": .string(holdNote)])
-                    placingHold = false
+                .autocorrectionDisabled()
+            SheetButtons(
+                error: error, busy: busy, action: action, destructive: true,
+                disabled: typed.trimmingCharacters(in: .whitespaces).lowercased() != phrase.lowercased(),
+                cancel: { dismiss() },
+                perform: {
+                    busy = true
+                    error = nil
+                    Task {
+                        defer { busy = false }
+                        do {
+                            try await perform()
+                            dismiss()
+                        } catch {
+                            self.error = error.localizedDescription
+                        }
+                    }
                 }
-                .keyboardShortcut(.defaultAction)
-            }
-        }
-        .padding(20)
-        .frame(width: 420)
-    }
-
-    private var title: String {
-        guard let c = confirming else { return "" }
-        switch c {
-        case .suspend: return "Suspend \(u.email)?"
-        case .signOut: return "Sign \(u.email) out everywhere?"
-        case .reset2fa: return "Reset 2-step sign-in for \(u.email)?"
-        case .delete: return "Delete \(u.email)?"
-        case .releaseHold: return "Release the legal hold on \(u.email)?"
-        case .revokeSession: return "Sign out this browser?"
-        case .role(let role): return role == "user" ? "Make \(u.email) an ordinary user?" : "Make \(u.email) \(role == "admin" ? "an admin" : role == "owner" ? "an owner" : "helpdesk staff")?"
-        }
-    }
-
-    private func button(_ c: Confirm) -> String {
-        switch c {
-        case .suspend: "Suspend"
-        case .signOut, .revokeSession: "Sign Out"
-        case .reset2fa: "Reset 2-Step"
-        case .delete: "Delete Account"
-        case .releaseHold: "Release Hold"
-        case .role: "Change Role"
-        }
-    }
-
-    private func message(_ c: Confirm) -> String {
-        switch c {
-        case .suspend: "They’re signed out at once and can’t sign in or use mail apps until reactivated. Their mail keeps arriving."
-        case .signOut: "Every browser they’re signed in on is signed out. Mail apps keep working until their app passwords are revoked."
-        case .reset2fa: "They sign in with only their password until they set up 2-step sign-in again. Do this only once you’re sure it’s them asking."
-        case .delete: "Their mail, contacts and settings are deleted for good. This can’t be undone."
-        case .releaseHold: "Their mail can be deleted again as usual: by retention, by them, or by deleting the account."
-        case .revokeSession: "That browser is signed out; they can sign in again."
-        case .role(let role):
-            switch role {
-            case "owner": "Owners can do everything an admin can, and make or remove other owners and admins."
-            case "admin": "Admins can manage everyone’s accounts, domains, sending and server settings, and open the admin panel here after confirming it’s them."
-            case "helpdesk": "Helpdesk staff can suspend, sign out and reset ordinary users, and invite people. Nothing else in the admin panel."
-            default: "They can no longer open the admin panel."
-            }
-        }
-    }
-
-    private func perform(_ c: Confirm) {
-        switch c {
-        case .suspend: panel.change("PUT", path, ["status": "suspended"])
-        case .signOut: panel.change("POST", "\(path)/signout")
-        case .reset2fa: panel.change("POST", "\(path)/reset-2fa")
-        case .delete: panel.deleteUser(u.id)
-        case .releaseHold: panel.change("PUT", "\(path)/legal-hold", ["hold": false])
-        case .revokeSession(let id): panel.change("DELETE", "\(path)/sessions/\(id)")
-        case .role(let role): panel.change("PUT", path, ["role": .string(role)])
-        }
-        confirming = nil
-    }
-
-    static func method(_ m: String) -> String {
-        switch m {
-        case "password": "Password"
-        case "passkey": "Passkey"
-        case "password+2fa": "Password + 2-step"
-        case "passkey+2fa": "Passkey + 2-step"
-        case "link": "Reset or setup link"
-        case "app-admin": "Admin unlock in an app"
-        case "app-admin+2fa": "Admin unlock in an app + 2-step"
-        case "app-admin+web": "Admin unlock in an app + web approval"
-        case "app-admin+email": "Admin unlock in an app + emailed code"
-        default: m
-        }
-    }
-
-    static func reason(_ r: String) -> String {
-        switch r {
-        case "wrong_password": "wrong password"
-        case "wrong_code": "wrong code"
-        case "passkey_rejected": "passkey rejected"
-        case "suspended": "account suspended"
-        case "denied": "denied on the web"
-        default: r
-        }
-    }
-
-    /// "Safari on macOS" from a browser's user agent.
-    static func device(_ ua: String) -> String {
-        let browser = ua.contains("Edg/") ? "Edge" : ua.contains("Firefox/") ? "Firefox" : ua.contains("Chrome/") ? "Chrome" : ua.contains("Safari/") ? "Safari" : "A browser"
-        let os = ua.contains("iPhone") ? "iPhone" : ua.contains("iPad") ? "iPad" : ua.contains("Android") ? "Android" : ua.contains("Mac OS X") ? "macOS" : ua.contains("Windows") ? "Windows" : ua.contains("Linux") ? "Linux" : ""
-        return os.isEmpty ? browser : "\(browser) on \(os)"
-    }
-}
-
-private struct NewUserSheet: View {
-    @Bindable var panel: AdminPanel
-    @Environment(\.dismiss) private var dismiss
-    @State private var email = ""
-    @State private var name = ""
-    @State private var personal = ""
-    @State private var role = "user"
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("New User").font(.headline)
-            Form {
-                TextField("Address", text: $email, prompt: Text("name@yourdomain.com"))
-                TextField("Name", text: $name)
-                TextField("Their current email", text: $personal, prompt: Text("Not at this domain"))
-                Picker("Role", selection: $role) {
-                    Text("User").tag("user")
-                    Text("Helpdesk").tag("helpdesk")
-                    Text("Admin").tag("admin")
-                }
-            }
-            Text("They choose their own password from a one-time setup link, emailed to their current address and shown here to hand on. That address becomes their recovery email.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
-            HStack {
-                Spacer()
-                Button("Cancel") { dismiss() }
-                    .keyboardShortcut(.cancelAction)
-                Button("Create") { create() }
-                    .keyboardShortcut(.defaultAction)
-                    .disabled(!ready)
-            }
+            )
         }
         .padding(20)
         .frame(width: 440)
     }
-
-    /// The current address is needed: it's where the setup link goes and becomes their recovery email, so it
-    /// can't be the new mailbox itself (they couldn't read it before choosing a password).
-    private var ready: Bool {
-        let address = email.trimmingCharacters(in: .whitespaces).lowercased()
-        let current = personal.trimmingCharacters(in: .whitespaces).lowercased()
-        return address.contains("@") && current.contains("@") && current != address && !name.trimmingCharacters(in: .whitespaces).isEmpty
-    }
-
-    private func create() {
-        let to = personal.trimmingCharacters(in: .whitespaces)
-        let body: [String: JSON] = [
-            "email": .string(email.trimmingCharacters(in: .whitespaces)),
-            "name": .string(name.trimmingCharacters(in: .whitespaces)),
-            "role": .string(role),
-            "setupEmail": .string(to),
-        ]
-        panel.change("POST", "/users", .object(body)) { r in (text: "Account created. A setup link went to \(to); you can also hand this one over.", link: r["setupUrl"]?.string) }
-        dismiss()
-    }
 }
 
-// MARK: Invitations
-
-struct AdminInvitesPage: View {
-    @Bindable var panel: AdminPanel
-    @State private var inviting = false
-    @State private var deleting: AdminInvite?
-
+/// An empty page, or one still loading.
+struct AdminLoading: View {
     var body: some View {
-        VStack(spacing: 0) {
-            HStack {
-                Text("Invitations let someone make their own account.").foregroundStyle(.secondary)
-                Spacer()
-                Button("New Invitation…") { inviting = true }
-            }
-            .padding(10)
-            List(panel.invites) { invite in
-                HStack {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(invite.email ?? "Any address").lineLimit(1)
-                        Text(status(invite)).font(.caption).foregroundStyle(.secondary)
-                    }
-                    Spacer()
-                    if invite.role != "user" { RoleBadge(role: invite.role) }
-                    if invite.usedAt == nil {
-                        if let to = invite.sentTo {
-                            Button("Resend") {
-                                panel.change("POST", "/invites/\(invite.id)/resend", ["sendTo": .string(to)]) { _ in (text: "Sent again to \(to).", link: nil) }
-                            }
-                        }
-                        Button(role: .destructive) { deleting = invite } label: { Image(systemName: "trash") }
-                            .accessibilityLabel("Delete Invitation")
-                    }
-                }
-            }
-        }
-        .sheet(isPresented: $inviting) { NewInviteSheet(panel: panel) }
-        .confirmationDialog(
-            "Delete the invitation\(deleting?.email.map { " for \($0)" } ?? "")?",
-            isPresented: Binding(get: { deleting != nil }, set: { if !$0 { deleting = nil } }),
-            presenting: deleting
-        ) { invite in
-            Button("Delete Invitation", role: .destructive) { panel.change("DELETE", "/invites/\(invite.id)") }
-        } message: { _ in
-            Text("Its link stops working. You can make a new invitation later.")
-        }
-    }
-
-    private func status(_ i: AdminInvite) -> String {
-        if let used = i.usedAt { return "Used \(adminDate(used))\(i.usedByEmail.map { " by \($0)" } ?? "")" }
-        let expires = wrenDate(i.expiresAt) ?? .now
-        if expires < .now { return "Expired \(adminDate(i.expiresAt))" }
-        return "Expires \(adminDate(i.expiresAt))\(i.sentTo.map { " · sent to \($0)" } ?? "")"
-    }
-}
-
-private struct NewInviteSheet: View {
-    @Bindable var panel: AdminPanel
-    @Environment(\.dismiss) private var dismiss
-    @State private var email = ""
-    @State private var sendTo = ""
-    @State private var role = "user"
-    @State private var days = 7
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("New Invitation").font(.headline)
-            Form {
-                TextField("Address to create", text: $email, prompt: Text("Optional: they choose one"))
-                TextField("Send it to", text: $sendTo, prompt: Text("Their current email (optional)"))
-                if !panel.isHelpdesk {
-                    Picker("Role", selection: $role) {
-                        Text("User").tag("user")
-                        Text("Admin").tag("admin")
-                    }
-                }
-                Picker("Works for", selection: $days) {
-                    ForEach([1, 7, 30], id: \.self) { Text("\($0) day\($0 == 1 ? "" : "s")").tag($0) }
-                }
-            }
-            HStack {
-                Spacer()
-                Button("Cancel") { dismiss() }
-                    .keyboardShortcut(.cancelAction)
-                Button("Create") { create() }
-                    .keyboardShortcut(.defaultAction)
-            }
-        }
-        .padding(20)
-        .frame(width: 440)
-    }
-
-    private func create() {
-        var body: [String: JSON] = ["role": .string(role), "days": .number(Double(days))]
-        let mailbox = email.trimmingCharacters(in: .whitespaces)
-        let to = sendTo.trimmingCharacters(in: .whitespaces)
-        if !mailbox.isEmpty { body["email"] = .string(mailbox) }
-        if !to.isEmpty { body["sendTo"] = .string(to) }
-        panel.change("POST", "/invites", .object(body)) { r in
-            (text: r["emailed"]?.bool == true ? "Invitation sent to \(to)." : "Invitation made. Send them the link.", link: r["url"]?.string)
-        }
-        dismiss()
-    }
-}
-
-// MARK: Mail queue
-
-struct AdminQueuePage: View {
-    @Bindable var panel: AdminPanel
-
-    var body: some View {
-        VStack(spacing: 0) {
-            Picker("Show", selection: $panel.queueStatus) {
-                Text("All").tag("")
-                Text("Waiting").tag("queued")
-                Text("Failed").tag("failed")
-                Text("Sent").tag("sent")
-            }
-            .pickerStyle(.segmented)
-            .labelsHidden()
-            .padding(10)
-            .onChange(of: panel.queueStatus) { Task { await panel.load() } }
-            if panel.queue.isEmpty {
-                ContentUnavailableView("Nothing Here", systemImage: "tray", description: Text("No messages with this status."))
-            } else {
-                List(panel.queue) { item in
-                    HStack(alignment: .top) {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(item.subject?.isEmpty == false ? item.subject! : "(no subject)").lineLimit(1)
-                            Text("\(item.from ?? "") → \(item.recipients.joined(separator: ", "))")
-                                .font(.caption).foregroundStyle(.secondary).lineLimit(1)
-                            if let error = item.lastError, item.status != "sent" {
-                                Text(error).font(.caption).foregroundStyle(.red).lineLimit(2)
-                            }
-                        }
-                        Spacer()
-                        VStack(alignment: .trailing, spacing: 4) {
-                            Text(item.status.capitalized).font(.caption.weight(.medium))
-                            Text(adminDate(item.updatedAt)).font(.caption).foregroundStyle(.secondary)
-                            if item.status == "failed" || item.status == "cancelled" {
-                                Button("Retry") { panel.change("POST", "/outbox/\(item.id)/retry") }
-                            } else if item.status == "queued" {
-                                Button("Cancel") { panel.change("POST", "/outbox/\(item.id)/cancel") }
-                            }
-                        }
-                    }
-                    .padding(.vertical, 2)
-                }
-            }
-        }
-    }
-}
-
-// MARK: Activity
-
-struct AdminActivityPage: View {
-    @Bindable var panel: AdminPanel
-
-    var body: some View {
-        List(panel.activity) { entry in
-            HStack(alignment: .firstTextBaseline) {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(entry.action).font(.system(.body, design: .monospaced)).lineLimit(1)
-                    Text([entry.userEmail, entry.target, entry.ip].compactMap { $0?.isEmpty == false ? $0 : nil }.joined(separator: " · "))
-                        .font(.caption).foregroundStyle(.secondary).lineLimit(1)
-                }
-                Spacer()
-                if entry.viaApp {
-                    Image(systemName: "macwindow").foregroundStyle(.secondary).help("Done from an app’s admin panel")
-                        .accessibilityLabel("From an app")
-                }
-                Text(adminDate(entry.createdAt)).font(.caption).foregroundStyle(.secondary)
-            }
-        }
+        ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 }

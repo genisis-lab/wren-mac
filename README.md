@@ -48,10 +48,23 @@ mail apps have to be turned on in Wren (Admin → Settings & policies → Securi
 - Settings → General: which account new mail is from when All Inboxes is showing, and whether new mail
   shows a notification and plays a sound. Settings → Viewing: the size of message text
 - The admin panel for Wren's administrators and helpdesk staff (Wren → Admin Panel…, ⌥⌘A, or the button at
-  the bottom of the sidebar): an overview,
-  people (suspend, sign out, reset 2-step sign-in, reset and setup links, roles, sending, legal hold,
-  delete), invitations, the outgoing mail queue and the activity log. Domains, providers and server
-  settings stay in the admin panel on the web (Open on the Web)
+  the bottom of the sidebar), with every page of the one on the web:
+  - Overview: alerts (fix, dismiss, check again), the setup checklist, today's numbers, the last weeks
+    of mail and sign-ins to look at
+  - Users: search, add one or import a CSV (with a dry run first), export a CSV, change several people
+    at once, and for each person their storage, sending limit, password and sign-in links, 2-step
+    sign-in, passkeys, sessions, roles, address changes, automatic reply and forwarding, legal hold,
+    mail exports and deleting them (with their mail kept for someone else if you like). Invitations
+  - Domains with their DNS records and checks, sending provider, DKIM, footer, catch-all and Cloudflare
+    setup; aliases and groups; shared mailboxes; providers (connect, check, send a test, the inbound
+    URL); DMARC reports
+  - The mail queue, delivery logs (outgoing, incoming and suppressed addresses, with each message's
+    timeline and headers) and the audit log
+  - Settings & policies (general, registration, security and the admin IP allowlist, limits, spam and
+    attachments, alerts, retention) and System & backup (backups, exports, restores, the encryption key,
+    announcements)
+
+  Helpdesk staff see Users and Invitations only, as on the web
 - Live updates over Wren's push stream, fetching only what changed, and reconnecting as soon as the Mac
   wakes or the network is back; a notification for new mail in your Inbox that opens
   the conversation when you click it, with Reply (type it right in the notification), Archive and
@@ -96,8 +109,11 @@ mail apps have to be turned on in Wren (Admin → Settings & policies → Securi
   The unlock is a token kept only in memory, usable only with this Mac's app password, and it ends after
   15 minutes without use or an hour in all, when you close the window or choose Lock, and when the Mac
   sleeps, its screen locks, Wren quits or the app password is revoked. Everything done there is in Wren's
-  activity log, marked as done from an app, and changes that can't be undone ask first. Wren's admin IP
-  allowlist and helpdesk limits apply as on the web.
+  audit log, marked as done from an app, and changes that can't be undone ask first (the biggest, such as
+  a restore or deleting several people, have you type a word to confirm). Wren's admin IP allowlist and
+  helpdesk limits apply as on the web, and the owner's own steps stay theirs: seeing the encryption key
+  takes their password (and 2-step code) again, and only the owner can restore. A restore signs everyone
+  out, this panel included.
 
 ## Building
 

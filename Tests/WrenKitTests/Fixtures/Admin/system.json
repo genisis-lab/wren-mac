@@ -1,0 +1,20 @@
+{
+  "version": "0.5.1",
+  "uptime": 434,
+  "publicUrl": "http://localhost:8787",
+  "storage": {
+    "database": 0,
+    "blobs": 2018
+  },
+  "backup": {
+    "pointInTime": false,
+    "searchRebuilding": false
+  },
+  "encryptingFiles": {
+    "left": null,
+    "skipped": 0,
+    "done": false
+  },
+  "keyMismatch": false,
+  "platform": "test"
+}

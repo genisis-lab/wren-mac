@@ -1,0 +1,23 @@
+{
+  "items": [
+    {
+      "id": 1,
+      "kind": "user",
+      "message_id": null,
+      "mail_from": "admin@wren.test",
+      "recipients": [
+        "bob@elsewhere.example"
+      ],
+      "subject": "Quarterly numbers",
+      "status": "failed",
+      "attempts": 3,
+      "next_attempt_at": 1794544834700,
+      "last_error": "550 no such user",
+      "provider_message_id": null,
+      "created_at": 1794544834700,
+      "updated_at": 1794544834700,
+      "provider_name": null,
+      "user_email": "admin@wren.test"
+    }
+  ]
+}

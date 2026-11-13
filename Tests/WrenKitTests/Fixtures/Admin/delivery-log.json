@@ -1,0 +1,35 @@
+{
+  "items": [
+    {
+      "id": 2,
+      "event": "failed",
+      "recipients": "bob@elsewhere.example",
+      "detail": "550 no such user",
+      "created_at": 1794544834700,
+      "outbox_id": 1,
+      "message_id": null,
+      "provider_name": null,
+      "user_email": "admin@wren.test",
+      "subject": "Quarterly numbers",
+      "mail_from": "admin@wren.test",
+      "kind": "user",
+      "outbox_status": "failed"
+    },
+    {
+      "id": 1,
+      "event": "deferred",
+      "recipients": "bob@elsewhere.example",
+      "detail": "try later",
+      "created_at": 1794544834700,
+      "outbox_id": 1,
+      "message_id": null,
+      "provider_name": null,
+      "user_email": "admin@wren.test",
+      "subject": "Quarterly numbers",
+      "mail_from": "admin@wren.test",
+      "kind": "user",
+      "outbox_status": "failed"
+    }
+  ],
+  "nextBefore": null
+}
