@@ -71,7 +71,7 @@ struct AdminSettingsPage: View {
 
     @ViewBuilder private func tab(_ s: AdminSettings) -> some View {
         switch panel.settingsTab {
-        case .general: GeneralSettings(panel: panel, s: binder, sender: s.systemSender, domains: domains, addresses: addresses)
+        case .general: GeneralAdminSettings(panel: panel, s: binder, sender: s.systemSender, domains: domains, addresses: addresses)
         case .registration: RegistrationSettings(s: binder, domains: domains)
         case .security: SecuritySettings(s: binder, clientIp: s.clientIp)
         case .limits: LimitsSettings(s: binder)
@@ -207,7 +207,7 @@ private struct SettingHelp: View {
 
 // MARK: General
 
-private struct GeneralSettings: View {
+private struct GeneralAdminSettings: View {
     let panel: AdminPanel
     let s: SettingsBinder
     let sender: AdminSettings.Sender?
