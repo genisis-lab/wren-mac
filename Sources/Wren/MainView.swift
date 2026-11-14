@@ -162,7 +162,7 @@ struct Sidebar: View {
         store.logins.flatMap { login -> [Note] in
             let who = store.logins.count > 1 ? "\(login.username): " : ""
             var notes: [Note] = []
-            if let problem = login.problem { notes.append(Note(text: who + problem, icon: "exclamationmark.triangle", help: problem)) }
+            if let problem = login.problem ?? login.pushConnection.problem { notes.append(Note(text: who + problem, icon: "exclamationmark.triangle", help: problem)) }
             let waiting = store.queuedCount(login)
             if waiting > 0 {
                 notes.append(Note(text: who + (waiting == 1 ? "1 change" : "\(waiting) changes") + " waiting for the connection", icon: "arrow.triangle.2.circlepath",
