@@ -38,8 +38,10 @@ final class Login: Identifiable {
     var preferences: Preferences?
     /// The admin panel for this sign-in, when its person is an admin or helpdesk staff. Its unlock lives only in memory.
     @ObservationIgnored let admin: AdminClient
-    /// A connection problem, shown quietly under the sidebar until the connection is back.
+    /// A mail-loading problem, cleared only after a successful reload or sync.
     var problem: String?
+    /// Background push reconnects have their own warning, cleared even when the next state is unchanged.
+    var pushConnection = PushConnectionRecovery()
     @ObservationIgnored var listening: Task<Void, Never>?
     /// Inbox messages already notified about (nil until the first look, so mail that was already there isn't announced).
     @ObservationIgnored var announced: Set<String>?
@@ -360,30 +362,33 @@ final class MailStore {
 
     /// Stay up to date: refresh whenever Wren says something changed, and reconnect when the stream ends or drops.
     private func listen(_ login: Login) async {
-        var delay = 2.0
         while !Task.isCancelled {
             do {
                 // Each connection fetches the session again, so shared mailboxes that come and go show up.
                 let session = try await login.client.connect()
+                guard !Task.isCancelled, self.login(login.id) === login else { return }
                 login.accounts = session.mailAccounts
                 for account in login.accounts { login.identities[account.id] = try await login.client.identities(account: account.id) }
                 if let personal = login.personal, personal.hasPreferences == true {
                     login.preferences = try? await login.client.preferences(account: personal.id)
                 }
                 await sendQueued(login)
+                guard !Task.isCancelled, self.login(login.id) === login else { return }
                 openPending()
-                delay = 2
                 // Wren sends the current state as soon as the stream opens, so this also loads everything.
                 try await login.client.listen { [weak self] changed in await self?.pushed(changed, to: login) }
+                guard !Task.isCancelled, self.login(login.id) === login else { return }
+                // Normal rotation is silent. Repeated closes without receiving state still need a warning.
+                login.pushConnection.failed(URLError(.networkConnectionLost))
             } catch JMAPError.unauthorized(_) {
+                guard !Task.isCancelled, self.login(login.id) === login else { return }
                 remove(login, message: "Wren didn’t accept the app password for \(login.username). If it was revoked, create a new one in Wren and sign in again.")
                 return
             } catch {
-                if Task.isCancelled { return }
-                login.problem = error.localizedDescription
+                guard !Task.isCancelled, self.login(login.id) === login else { return }
+                login.pushConnection.failed(error)
             }
-            try? await Task.sleep(for: .seconds(delay))
-            delay = min(delay * 2, 60)
+            try? await Task.sleep(for: .seconds(login.pushConnection.nextRetryDelay()))
         }
     }
 
@@ -494,9 +499,12 @@ final class MailStore {
     /// The push stream said these accounts changed. The first time (nothing to compare with) everything loads;
     /// after that only what changed does (`sync`).
     private func pushed(_ changed: [String: String], to login: Login) async {
+        guard !Task.isCancelled, self.login(login.id) === login else { return }
+        login.pushConnection.receivedState()
         let fresh = changed.filter { account, state in login.states[account] != state && login.accounts.contains { $0.id == account } }
-        if changed.isEmpty || login.states.isEmpty {
-            // A server that doesn't say, or the first word since connecting: load it all.
+        if changed.isEmpty || login.states.isEmpty || login.problem != nil {
+            // Retry a failed mail load even if the server state is unchanged. A working push alone
+            // must not hide that error; only the successful reload below can clear it.
             login.states.merge(changed) { $1 }
             return await refresh(login)
         }
