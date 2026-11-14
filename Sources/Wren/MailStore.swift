@@ -378,8 +378,7 @@ final class MailStore {
                 // Wren sends the current state as soon as the stream opens, so this also loads everything.
                 try await login.client.listen { [weak self] changed in await self?.pushed(changed, to: login) }
                 guard !Task.isCancelled, self.login(login.id) === login else { return }
-                // Normal rotation is silent. Repeated closes without receiving state still need a warning.
-                login.pushConnection.failed(URLError(.networkConnectionLost))
+                // A clean end is normal server rotation, not a failed request.
             } catch JMAPError.unauthorized(_) {
                 guard !Task.isCancelled, self.login(login.id) === login else { return }
                 remove(login, message: "Wren didn’t accept the app password for \(login.username). If it was revoked, create a new one in Wren and sign in again.")
