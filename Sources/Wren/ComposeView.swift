@@ -499,10 +499,25 @@ struct ComposeView: View {
     }
 
     private func discard() {
-        done = true
-        let d = draft
-        Task { await store.discard(d) }
-        dismiss()
+        guard !busy, !done else { return }
+        busy = true
+        error = nil
+        let deletion = Task {
+            while copy.saving { try await Task.sleep(for: .milliseconds(50)) }
+            try await store.discard(draft)
+        }
+        copy.deletion = deletion
+        Task {
+            do {
+                try await deletion.value
+                done = true
+                dismiss()
+            } catch {
+                self.error = "Couldn’t delete draft: \(error.localizedDescription)"
+            }
+            copy.deletion = nil
+            busy = false
+        }
     }
 
     private static func isBlank(_ d: Draft) -> Bool {
@@ -512,25 +527,27 @@ struct ComposeView: View {
     /// Changes so far into Drafts, replacing the last copy. Not with Encrypt or Sign on: sealing can ask for the
     /// passphrase, which shouldn't pop up while you type; those are saved when the window closes.
     private func autosave() async {
-        let d = draft
-        guard !done, !busy, !copy.saving, uploading == 0, !usesPGP, d != saved, !Self.isBlank(d) else { return }
+        guard !copy.saving else { return }
         copy.saving = true
         defer { copy.saving = false }
-        guard let id = try? await store.save(d) else { return }
-        copy.id = id
-        guard !done else { return }
-        // The next save replaces this one. What's typed meanwhile stays a change, for the next round.
-        var kept = d
-        kept.replaces = id
-        saved = kept
-        draft.replaces = id
+        while !Task.isCancelled && !done && !busy && uploading == 0 && !usesPGP && draft != saved && !Self.isBlank(draft) {
+            var snapshot = draft
+            guard let id = try? await store.save(snapshot) else { return }
+            copy.id = id
+            snapshot.replaces = id
+            saved = snapshot
+            draft.replaces = id
+            // If the editor changed during this write, immediately save the newer version.
+        }
     }
 
     private func saveOnClose() {
         let d = draft
         guard !done, d != saved, !Self.isBlank(d) else { return }
         let copy = copy
+        let deletion = copy.deletion
         Task {
+            if let deletion, (try? await deletion.value) != nil { return }
             // A save still under way made a newer copy; this one replaces that.
             while copy.saving { try? await Task.sleep(for: .milliseconds(50)) }
             var d = d
@@ -562,6 +579,7 @@ struct SendCheck {
 final class DraftCopy {
     var id: String?
     var saving = false
+    var deletion: Task<Void, Error>?
 }
 
 struct ScheduleSheet: View {

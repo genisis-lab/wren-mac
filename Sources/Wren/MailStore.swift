@@ -1443,13 +1443,10 @@ final class MailStore {
     }
 
     /// Throw away a draft that was saved before.
-    func discard(_ draft: Draft) async {
-        guard let id = draft.replaces, let login = login(of: draft) else { return }
-        do {
-            try await login.client.destroy(account: draft.accountId, ids: [id])
-        } catch {
-            alert = error.localizedDescription
-        }
+    func discard(_ draft: Draft) async throws {
+        guard let id = draft.replaces else { return }
+        guard let login = login(of: draft) else { throw NotConnected() }
+        try await login.client.destroy(account: draft.accountId, ids: [id])
         await refresh(login)
     }
 
