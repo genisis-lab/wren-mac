@@ -9,7 +9,7 @@ options:
 settings:
   base:
     SWIFT_VERSION: "5.0"
-    MARKETING_VERSION: 0.1.1
+    MARKETING_VERSION: 0.1.2
     CURRENT_PROJECT_VERSION: 1
     # Signed for this Mac only unless bundle.sh (or Xcode) is given a team and certificate.
     CODE_SIGN_STYLE: Manual
